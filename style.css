@@ -7,6 +7,7 @@
   --text: #e2e8f0;
   --subtle: #94a3b8;
   --error: #f87171;
+  --success: #4ade80;
 }
 
 * {
@@ -41,6 +42,11 @@ h2 {
   font-size: 1.4rem;
 }
 
+h3 {
+  margin: 20px 0 8px 0;
+  font-size: 1.15rem;
+}
+
 .tagline {
   margin-top: 8px;
   color: var(--subtle);
@@ -67,6 +73,14 @@ main {
   margin: 0 0 16px 0;
   color: var(--subtle);
   font-size: 0.95rem;
+}
+
+.hint.status {
+  color: var(--text);
+}
+
+.hint.error {
+  color: var(--error);
 }
 
 .input-grid {
@@ -98,6 +112,35 @@ main {
   color: var(--subtle);
 }
 
+.auto-fetch {
+  margin-top: 20px;
+  padding: 16px;
+  border-radius: 10px;
+  background: rgba(148, 163, 184, 0.12);
+}
+
+.auto-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+}
+
+.auto-controls label {
+  font-size: 0.95rem;
+  color: var(--subtle);
+}
+
+.auto-controls input[type="text"] {
+  flex: 1;
+  min-width: 180px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.4);
+  background: rgba(15, 23, 42, 0.6);
+  color: var(--text);
+}
+
 button {
   font-size: 1rem;
   font-weight: 600;
@@ -120,11 +163,17 @@ button:hover {
 }
 
 .status {
-  color: var(--subtle);
+  color: var(--text);
 }
 
 .error {
   color: var(--error);
+}
+
+.status.meta {
+  margin-bottom: 12px;
+  font-size: 0.9rem;
+  color: var(--subtle);
 }
 
 .data-table {
@@ -169,6 +218,15 @@ footer {
   }
 
   button {
+    width: 100%;
+  }
+
+  .auto-controls {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .auto-controls button {
     width: 100%;
   }
 }

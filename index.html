@@ -9,13 +9,13 @@
 <body>
   <header>
     <h1>NFL Elo Power Ratings</h1>
-    <p class="tagline">Upload historical results, upcoming schedule, and optional market lines to generate model projections.</p>
+    <p class="tagline">Upload CSVs or auto-fetch nflverse data to generate ratings and betting edges.</p>
   </header>
 
   <main>
     <section class="panel">
-      <h2>1. Upload CSV Inputs</h2>
-      <p class="hint">Use CSVs from the Python CLI or nflverse exports. Headers must include season/week/team columns.</p>
+      <h2>1. Provide Input Data</h2>
+      <p class="hint">Use CSVs from the Python CLI, nflverse exports, or let the site download the latest schedule/results for you.</p>
       <div class="input-grid">
         <label class="file-input">
           <span class="input-title">Completed Games</span>
@@ -33,6 +33,16 @@
           <span class="input-desc">Spread and moneyline odds for edge calculations.</span>
         </label>
       </div>
+
+      <div class="auto-fetch">
+        <h3>Auto-Fetch from nflverse</h3>
+        <div class="auto-controls">
+          <label for="seasonInput">Seasons (comma/range):</label>
+          <input id="seasonInput" type="text" value="2010-2025" autocomplete="off" />
+          <button id="autoFetchBtn" type="button">Fetch Latest Data</button>
+        </div>
+        <p id="autoStatus" class="hint">Awaiting auto fetch (optional).</p>
+      </div>
     </section>
 
     <section class="panel">
@@ -47,7 +57,7 @@
   </main>
 
   <footer>
-    <p>Built with vanilla HTML/CSS/JS. All calculations run locally in your browser.</p>
+    <p>All calculations run locally in your browser. Data sourced from nflverse (habitatring.com games.csv).</p>
   </footer>
 
   <script src="papaparse.min.js"></script>
