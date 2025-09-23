@@ -302,3 +302,144 @@ footer {
   color: var(--subtle);
   margin-bottom: 16px;
 }
+
+
+.tab-nav {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+  margin: 0 auto 24px auto;
+  max-width: 960px;
+}
+
+.tab-button {
+  padding: 10px 18px;
+  border-radius: 999px;
+  border: 1px solid rgba(34, 211, 238, 0.4);
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  transition: background 0.2s ease, color 0.2s ease, transform 0.15s ease;
+}
+
+.tab-button.active {
+  background: var(--accent);
+  color: #0f172a;
+}
+
+.tab-button:hover {
+  transform: translateY(-1px);
+}
+
+.tab-section {
+  display: none;
+}
+
+.tab-section.active {
+  display: block;
+}
+
+.api-controls {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.api-controls input {
+  flex: 1;
+  min-width: 200px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.4);
+  background: rgba(15, 23, 42, 0.6);
+  color: var(--text);
+}
+
+.ev-game {
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 16px;
+  background: rgba(148, 163, 184, 0.08);
+}
+
+.ev-game h3 {
+  margin: 0 0 12px 0;
+}
+
+.ev-body {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.ev-metrics {
+  flex: 1 1 220px;
+  font-size: 0.9rem;
+  color: var(--subtle);
+}
+
+.ev-inputs {
+  flex: 1 1 220px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.ev-inputs label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 0.9rem;
+}
+
+.ev-inputs input {
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid rgba(148, 163, 184, 0.4);
+  background: rgba(15, 23, 42, 0.6);
+  color: var(--text);
+}
+
+.ev-results {
+  font-size: 0.85rem;
+  color: var(--subtle);
+}
+
+.custom-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-end;
+}
+
+.custom-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 0.9rem;
+}
+
+.custom-form input,
+.custom-form select {
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.4);
+  background: rgba(15, 23, 42, 0.6);
+  color: var(--text);
+}
+
+.custom-form button {
+  padding: 10px 18px;
+}
+
+@media (max-width: 768px) {
+  .ev-body {
+    flex-direction: column;
+  }
+
+  .tab-nav {
+    flex-direction: column;
+  }
+}

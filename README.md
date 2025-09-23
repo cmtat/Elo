@@ -62,7 +62,13 @@ All model parameters (base rating, K-factor, home field, regression, spread conv
 
 ### 2. Static Website
 
-Open `index.html` in your browser (or host the repo with GitHub Pages). Upload CSVs exported from the CLI, or use the **Auto-Fetch** control to pull the latest `games.csv` snapshot from the nflverse (habitatring.com) repository directly in the browser. You can also upload sportsbook JSON (e.g., `Extract.json`) to surface positive expected-value moneyline bets alongside the model tables. Then hit **Run Model**—everything executes locally with no backend required.
+Open `index.html` in your browser (or host the repo with GitHub Pages). The UI is split into three tabs:
+
+- **Elo Model Ratings** – upload games/schedules or auto-fetch nflverse data, then run the Elo engine to view ratings and upcoming edges.
+- **EV Calculator** – enter your [The Odds API](https://the-odds-api.com) key, pull current US sportsbook prices, and plug in your own odds to see expected value versus the market consensus and the model.
+- **Custom Bet Comparison** – pick a game, enter the odds you can place, and instantly compare against the Elo win probability and aggregated market lines.
+
+Everything runs client-side—no backend required.
 
 ## Input Data Contracts
 

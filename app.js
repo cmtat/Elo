@@ -1,9 +1,20 @@
+
 const state = {
   games: null,
   upcoming: null,
   market: null,
-  books: null,
   autoMeta: null,
+  ratings: null,
+  predictions: null,
+  predictionMap: new Map(),
+  sportsbookData: [],
+  consensusMap: new Map(),
+  evInputs: {},
+  customBets: [],
+  apiKey: '',
+  apiLoading: false,
+  apiStatus: null,
+  activeTab: 'elo',
 };
 
 const DEFAULT_CONFIG = {
@@ -26,12 +37,12 @@ const HEADER_TOOLTIPS = {
     home: 'Home team abbreviation.',
     away: 'Away team abbreviation.',
     prob: 'Model probability that the home team wins.',
-    spread: 'Model fair spread (negative favors the home team).',
-    fairml: 'Model fair moneyline for the home team based on win probability.',
+    spread: 'Model fair spread (negative favours the home team).',
+    fairml: 'Fair moneyline derived from the model win probability.',
     marketspread: 'Sportsbook market spread for the home team.',
     spreadedge: 'Market spread minus model spread (positive = model likes the home side).',
-    ml: 'Sportsbook home moneyline price.',
-    mledge: 'Home win probability minus implied market probability; positive = home moneyline value.',
+    ml: 'Sportsbook moneyline price for the home team.',
+    mledge: 'Difference between model win probability and implied market win probability.',
   },
 };
 
@@ -168,8 +179,8 @@ const parseSeasonList = (raw) => {
         for (let year = lo; year <= hi; year += 1) seasons.add(year);
       }
     } else {
-      const year = Number(part);
-      if (Number.isFinite(year)) seasons.add(year);
+      const single = Number(part);
+      if (Number.isFinite(single)) seasons.add(single);
     }
   });
   return Array.from(seasons).sort((a, b) => a - b);
@@ -187,38 +198,6 @@ const extractPublishedTime = (text) => {
   return match ? match[1].trim() : null;
 };
 
-const parseCsvString = (csvText) => {
-  const parsed = Papa.parse(csvText, {
-    header: true,
-    dynamicTyping: false,
-    skipEmptyLines: true,
-  });
-  if (parsed.errors && parsed.errors.length) {
-    const sample = parsed.errors[0];
-    throw new Error(`CSV parse error at row ${sample.row}: ${sample.message}`);
-  }
-  return parsed.data;
-};
-
-const setAutoStatus = (message, variant = 'status') => {
-  const el = document.getElementById('autoStatus');
-  if (!el) return;
-  el.textContent = message;
-  el.className = `hint ${variant}`;
-};
-
-const setFileInputBadge = (inputId, message) => {
-  const input = document.getElementById(inputId);
-  const label = input ? input.closest('.file-input') : null;
-  const desc = label ? label.querySelector('.input-desc') : null;
-  if (desc) {
-    if (!desc.dataset.defaultText) {
-      desc.dataset.defaultText = desc.textContent.trim();
-    }
-    desc.textContent = message || desc.dataset.defaultText || '';
-  }
-};
-
 const parseCsvFile = (file) =>
   new Promise((resolve, reject) => {
     Papa.parse(file, {
@@ -230,15 +209,6 @@ const parseCsvFile = (file) =>
     });
   });
 
-const parseJsonFile = async (file) => {
-  const text = await file.text();
-  try {
-    return JSON.parse(text);
-  } catch (err) {
-    throw new Error(`Invalid JSON: ${err.message}`);
-  }
-};
-
 const firstExisting = (row, keys) => {
   for (const key of keys) {
     if (Object.prototype.hasOwnProperty.call(row, key) && row[key] !== undefined) {
@@ -246,6 +216,12 @@ const firstExisting = (row, keys) => {
     }
   }
   return undefined;
+};
+
+const normalizeDate = (series) => {
+  if (!series) return null;
+  const date = new Date(series);
+  return Number.isNaN(date.getTime()) ? null : date;
 };
 
 const normalizeGames = (rows) => {
@@ -260,7 +236,6 @@ const normalizeGames = (rows) => {
     const homeScore = toNumber(firstExisting(row, ['home_score', 'score_home', 'team_home_score', 'home_score_total']));
     const awayScore = toNumber(firstExisting(row, ['away_score', 'score_away', 'team_away_score', 'away_score_total']));
     const neutralRaw = firstExisting(row, ['neutral_site', 'neutral', 'schedule_neutral_site', 'stadium_neutral']);
-    const location = row.location;
     const dateRaw = firstExisting(row, ['date', 'game_date', 'schedule_date', 'gameday']);
     const gameId = firstExisting(row, ['game_id', 'schedule_id', 'gameday_id']);
 
@@ -275,7 +250,7 @@ const normalizeGames = (rows) => {
       continue;
     }
 
-    const date = dateRaw ? new Date(dateRaw) : null;
+    const date = dateRaw ? normalizeDate(dateRaw) : null;
     games.push({
       season,
       week,
@@ -284,7 +259,7 @@ const normalizeGames = (rows) => {
       awayTeam: String(awayTeam).trim(),
       homeScore,
       awayScore,
-      neutral: neutralRaw !== undefined ? toBool(neutralRaw) : String(location || '').toLowerCase() === 'neutral',
+      neutral: toBool(neutralRaw),
       gameId: gameId ? String(gameId) : null,
     });
   }
@@ -316,10 +291,10 @@ const normalizeUpcoming = (rows) => {
     upcoming.push({
       season,
       week,
-      date: dateRaw ? new Date(dateRaw) : null,
+      date: dateRaw ? normalizeDate(dateRaw) : null,
       homeTeam: String(homeTeam).trim(),
       awayTeam: String(awayTeam).trim(),
-      neutral: toBool(firstExisting(row, ['neutral_site', 'neutral', 'schedule_neutral_site'])) || String(row.location || '').toLowerCase() === 'neutral',
+      neutral: toBool(firstExisting(row, ['neutral_site', 'neutral', 'schedule_neutral_site'])),
       gameId: gameId ? String(gameId) : null,
     });
   }
@@ -354,41 +329,6 @@ const normalizeMarket = (rows) => {
     });
   }
   return market;
-};
-
-const extractGameLines = (json) => {
-  if (!json || !Array.isArray(json.sports)) return [];
-  const lines = [];
-  json.sports.forEach((sport) => {
-    (sport.sub_types || []).forEach((sub) => {
-      const offering = sub.offering || {};
-      const games = offering.GameLines || offering.gameLines || [];
-      games.forEach((game) => {
-        const awayTeam = normalizeTeamName(game.Team1ID || game.team1 || game.team1Id);
-        const homeTeam = normalizeTeamName(game.Team2ID || game.team2 || game.team2Id);
-        if (!awayTeam || !homeTeam) return;
-        const spreadAway = toNumber(game.Spread ?? game.spread ?? null);
-        const spreadHome = spreadAway === null ? null : -spreadAway;
-        const spreadOddsAway = toNumber(game.SpreadAdj1 ?? game.spreadAdj1 ?? game.spreadOddsAway ?? null);
-        const spreadOddsHome = toNumber(game.SpreadAdj2 ?? game.spreadAdj2 ?? game.spreadOddsHome ?? null);
-        const moneylineAway = toNumber(game.MoneyLine1 ?? game.moneyLine1 ?? game.awayMoneyline ?? null);
-        const moneylineHome = toNumber(game.MoneyLine2 ?? game.moneyLine2 ?? game.homeMoneyline ?? null);
-        const eventDate = game.GameDateTimeString || game.EventDate || game.gameDate || null;
-        lines.push({
-          homeTeam,
-          awayTeam,
-          spreadHome,
-          spreadAway,
-          spreadOddsHome,
-          spreadOddsAway,
-          moneylineHome,
-          moneylineAway,
-          eventDate,
-        });
-      });
-    });
-  });
-  return lines;
 };
 
 const logistic = (diff) => 1 / (1 + 10 ** (-diff / 400));
@@ -521,8 +461,8 @@ const predictGames = (upcoming, teams, config = DEFAULT_CONFIG) => {
       season: game.season,
       week: game.week,
       date: game.date,
-      homeTeam: game.homeTeam,
-      awayTeam: game.awayTeam,
+      homeTeam: canonicalTeamCode(game.homeTeam),
+      awayTeam: canonicalTeamCode(game.awayTeam),
       neutral: game.neutral,
       homeRating,
       awayRating,
@@ -565,18 +505,115 @@ const mergeMarket = (predictions, market) => {
   });
 };
 
+const buildPredictionKey = (homeTeam, awayTeam) => `${canonicalTeamCode(homeTeam)}|${canonicalTeamCode(awayTeam)}`;
+
+const buildPredictionMap = (predictions) => {
+  const map = new Map();
+  predictions.forEach((pred) => {
+    map.set(buildPredictionKey(pred.homeTeam, pred.awayTeam), pred);
+  });
+  return map;
+};
+
+const buildConsensusMap = (games) => {
+  const map = new Map();
+  if (!games || !games.length) return map;
+
+  games.forEach((game) => {
+    const homeCode = canonicalTeamCode(normalizeTeamName(game.home_team));
+    const awayCode = canonicalTeamCode(normalizeTeamName(game.away_team));
+    if (!homeCode || !awayCode) return;
+    const key = buildPredictionKey(homeCode, awayCode);
+
+    const consensus = {
+      homeTeam: game.home_team,
+      awayTeam: game.away_team,
+      homeCode,
+      awayCode,
+      homeProb: null,
+      awayProb: null,
+      bestHomeMoneyline: null,
+      bestAwayMoneyline: null,
+      bestHomeMoneylineBook: null,
+      bestAwayMoneylineBook: null,
+    };
+
+    let homeProbSum = 0;
+    let homeProbCount = 0;
+    let awayProbSum = 0;
+    let awayProbCount = 0;
+
+    (game.bookmakers || []).forEach((book) => {
+      const h2h = (book.markets || []).find((m) => m.key === 'h2h');
+      if (!h2h) return;
+      h2h.outcomes.forEach((outcome) => {
+        const teamCode = canonicalTeamCode(normalizeTeamName(outcome.name));
+        const price = toNumber(outcome.price);
+        if (teamCode === homeCode && price !== null) {
+          const implied = oddsToProb(price);
+          if (implied !== null) {
+            homeProbSum += implied;
+            homeProbCount += 1;
+          }
+          const decimal = americanOddsToDecimal(price);
+          if (decimal !== null) {
+            const best = consensus.bestHomeMoneyline;
+            const bestDecimal = best ? americanOddsToDecimal(best) : null;
+            if (bestDecimal === null || decimal > bestDecimal) {
+              consensus.bestHomeMoneyline = price;
+              consensus.bestHomeMoneylineBook = book.title;
+            }
+          }
+        }
+        if (teamCode === awayCode && price !== null) {
+          const implied = oddsToProb(price);
+          if (implied !== null) {
+            awayProbSum += implied;
+            awayProbCount += 1;
+          }
+          const decimal = americanOddsToDecimal(price);
+          if (decimal !== null) {
+            const best = consensus.bestAwayMoneyline;
+            const bestDecimal = best ? americanOddsToDecimal(best) : null;
+            if (bestDecimal === null || decimal > bestDecimal) {
+              consensus.bestAwayMoneyline = price;
+              consensus.bestAwayMoneylineBook = book.title;
+            }
+          }
+        }
+      });
+    });
+
+    if (homeProbCount > 0) {
+      consensus.homeProb = homeProbSum / homeProbCount;
+    }
+    if (awayProbCount > 0) {
+      consensus.awayProb = awayProbSum / awayProbCount;
+    }
+
+    map.set(key, consensus);
+  });
+
+  return map;
+};
+
 const formatNumber = (value, digits = 3) => {
   if (value === null || value === undefined || Number.isNaN(value)) return '-';
   return Number(value).toFixed(digits);
 };
 
 const formatMoneyline = (value) => {
-  if (value === null || value === undefined) return '-';
+  if (value === null || value === undefined || Number.isNaN(value)) return '-';
   return value > 0 ? `+${value}` : String(value);
 };
 
 const formatPercent = (value) => {
-  if (value === null || value === undefined) return '-';
+  if (value === null || value === undefined || Number.isNaN(value)) return '-';
+  return `${(value * 100).toFixed(1)}%`;
+};
+
+const formatEv = (value) => {
+  if (value === null || value === undefined || Number.isNaN(value)) return '-';
   return `${(value * 100).toFixed(1)}%`;
 };
 
@@ -599,6 +636,9 @@ const describeAutoMeta = (meta) => {
 };
 
 const renderRatingsTable = (ratings, meta) => {
+  if (!ratings || !ratings.length) {
+    return '<p class="hint">Run the model to view team ratings.</p>';
+  }
   const rows = ratings
     .map((row, index) => {
       const lastGame = row.lastGameDate ? new Date(row.lastGameDate) : null;
@@ -631,15 +671,18 @@ const renderRatingsTable = (ratings, meta) => {
               <th data-sort-key="last" data-sort-type="number" title="${getHeaderTooltip('ratings','last')}">Last Game</th>
             </tr>
           </thead>
-          <tbody>${rows || '<tr><td colspan="5">No ratings computed.</td></tr>'}</tbody>
+          <tbody>${rows}</tbody>
         </table>
       </div>
     </section>
   `;
 };
 
-
 const renderPredictionsTable = (predictions) => {
+  if (!predictions || !predictions.length) {
+    return '<p class="hint">Load an upcoming schedule (or auto-fetch) to see model projections.</p>';
+  }
+
   const filtered = predictions.filter((row) => {
     const hasSpread = row.marketSpread !== null && row.marketSpread !== undefined;
     const hasSpreadEdge = row.homeSpreadEdge !== null && row.homeSpreadEdge !== undefined;
@@ -647,6 +690,7 @@ const renderPredictionsTable = (predictions) => {
     const hasMoneylineEdge = row.homeMoneylineEdge !== null && row.homeMoneylineEdge !== undefined;
     return (hasSpread && hasSpreadEdge) || (hasMoneyline && hasMoneylineEdge);
   });
+
   const rows = filtered
     .map((row) => {
       const fairMl = row.homeFairMoneyline ?? '';
@@ -669,7 +713,9 @@ const renderPredictionsTable = (predictions) => {
     `;
     })
     .join('');
+
   const explainer = `<p class="hint explanation">Home Win % converts Elo rating differences into win probability; Model Spread divides that rating edge by the Elo-to-spread factor; Fair ML turns the win probability into a moneyline; Market Spread and Home ML come from your uploads/auto fetch; Spread Edge is market spread minus model spread; ML Edge compares model win probability with the market's implied win probability.</p>`;
+
   return `
     <section class="collapsible" data-section="predictions">
       <div class="collapsible-header" role="button" tabindex="0" aria-expanded="true">Upcoming Games</div>
@@ -696,164 +742,198 @@ const renderPredictionsTable = (predictions) => {
   `;
 };
 
+const computeConsensusForGame = (gameKey) => state.consensusMap.get(gameKey) || null;
 
-const applyBookLinesToPredictions = (predictions, bookLines) => {
-  if (!predictions || !predictions.length || !bookLines || !bookLines.length) return predictions;
-  const bookMap = new Map();
-  bookLines.forEach((line) => {
-    const homeCode = canonicalTeamCode(line.homeTeam);
-    const awayCode = canonicalTeamCode(line.awayTeam);
-    const key = `${homeCode}|${awayCode}`;
-    bookMap.set(key, line);
-  });
-  return predictions.map((pred) => {
-    const homeCode = canonicalTeamCode(pred.homeTeam);
-    const awayCode = canonicalTeamCode(pred.awayTeam);
-    const key = `${homeCode}|${awayCode}`;
-    const book = bookMap.get(key);
-    if (!book) return pred;
-    const updated = { ...pred };
-    if (book.spreadHome !== null && book.spreadHome !== undefined) {
-      updated.marketSpread = book.spreadHome;
-      updated.homeSpreadEdge = updated.marketSpread - pred.modelSpread;
-    }
-    if (book.moneylineHome !== null && book.moneylineHome !== undefined) {
-      const implied = oddsToProb(book.moneylineHome);
-      updated.homeMoneyline = book.moneylineHome;
-      updated.homeMoneylineImplied = implied;
-      updated.homeMoneylineEdge = implied === null ? null : pred.homeWinProb - implied;
-    }
-    if (book.moneylineAway !== null && book.moneylineAway !== undefined) {
-      const impliedAway = oddsToProb(book.moneylineAway);
-      const awayProb = pred.awayWinProb ?? (1 - pred.homeWinProb);
-      updated.awayMoneyline = book.moneylineAway;
-      updated.awayMoneylineImplied = impliedAway;
-      updated.awayMoneylineEdge = impliedAway === null ? null : awayProb - impliedAway;
-    }
-    return updated;
-  });
-};
+const getEvInput = (gameKey) => state.evInputs[gameKey] || { home: '', away: '' };
 
-const calculateEvBets = (predictions, bookLines) => {
-  if (!predictions || !predictions.length || !bookLines || !bookLines.length) return [];
-  const predictionMap = new Map();
-  predictions.forEach((pred) => {
-    const homeCode = canonicalTeamCode(pred.homeTeam);
-    const awayCode = canonicalTeamCode(pred.awayTeam);
-    const key = `${homeCode}|${awayCode}`;
-    predictionMap.set(key, pred);
-  });
+const renderEvCalculator = () => {
+  const container = document.getElementById('evContent');
+  if (!container) return;
 
-  const records = [];
-
-  bookLines.forEach((line) => {
-    const homeCode = canonicalTeamCode(line.homeTeam);
-    const awayCode = canonicalTeamCode(line.awayTeam);
-    const key = `${homeCode}|${awayCode}`;
-    const prediction = predictionMap.get(key);
-    if (!prediction) return;
-
-    if (line.moneylineHome !== null && line.moneylineHome !== undefined) {
-      const implied = oddsToProb(line.moneylineHome);
-      const edge = implied === null ? null : prediction.homeWinProb - implied;
-      const ev = expectedValue(prediction.homeWinProb, line.moneylineHome);
-      if (ev !== null) {
-        records.push({
-          game: `${prediction.homeTeam} vs ${prediction.awayTeam}`,
-          bet: `${prediction.homeTeam} ML`,
-          side: prediction.homeTeam,
-          opponent: prediction.awayTeam,
-          odds: line.moneylineHome,
-          modelProb: prediction.homeWinProb,
-          impliedProb: implied,
-          edge,
-          ev,
-          eventDate: line.eventDate || prediction.date || null,
-        });
-      }
-    }
-
-    if (line.moneylineAway !== null && line.moneylineAway !== undefined) {
-      const implied = oddsToProb(line.moneylineAway);
-      const awayProb = prediction.awayWinProb ?? (1 - prediction.homeWinProb);
-      const edge = implied === null ? null : awayProb - implied;
-      const ev = expectedValue(awayProb, line.moneylineAway);
-      if (ev !== null) {
-        records.push({
-          game: `${prediction.homeTeam} vs ${prediction.awayTeam}`,
-          bet: `${prediction.awayTeam} ML`,
-          side: prediction.awayTeam,
-          opponent: prediction.homeTeam,
-          odds: line.moneylineAway,
-          modelProb: awayProb,
-          impliedProb: implied,
-          edge,
-          ev,
-          eventDate: line.eventDate || prediction.date || null,
-        });
-      }
-    }
-  });
-
-  if (!records.length) return [];
-  records.sort((a, b) => b.ev - a.ev);
-  const positive = records.filter((entry) => entry.ev > 0);
-  const best = positive.length ? positive : records.slice(0, Math.min(10, records.length));
-  return best;
-};
-
-const renderEvTable = (entries) => {
-  if (!entries || !entries.length) {
-    return `
-    <section class="collapsible" data-section="ev">
-      <div class="collapsible-header" role="button" tabindex="0" aria-expanded="true">Best EV Opportunities</div>
-      <div class="collapsible-body">
-        <p class="hint">Upload sportsbook lines to see expected value plays.</p>
-      </div>
-    </section>
-    `;
+  if (!state.predictions || !state.predictions.length) {
+    container.innerHTML = '<p class="hint">Run the Elo model first to generate matchup probabilities.</p>';
+    return;
   }
 
-  const rows = entries
-    .map((entry) => {
-      const edgePercent = entry.edge === null ? '-' : formatPercent(entry.edge);
-      const modelPercent = entry.modelProb === null ? '-' : formatPercent(entry.modelProb);
-      const impliedPercent = entry.impliedProb === null ? '-' : formatPercent(entry.impliedProb);
-      const evValue = entry.ev === null ? '-' : formatNumber(entry.ev, 3);
+  if (!state.sportsbookData.length) {
+    container.innerHTML = '<p class="hint">Enter your The Odds API key and load sportsbook odds to unlock EV calculations.</p>';
+    return;
+  }
+
+  const games = state.predictions;
+  const sections = games
+    .map((game) => {
+      const key = buildPredictionKey(game.homeTeam, game.awayTeam);
+      const consensus = computeConsensusForGame(key);
+      const inputs = getEvInput(key);
+      const homeOdds = inputs.home;
+      const awayOdds = inputs.away;
+
+      const modelHomeProb = game.homeWinProb;
+      const modelAwayProb = game.awayWinProb;
+      const consensusHomeProb = consensus?.homeProb ?? null;
+      const consensusAwayProb = consensus?.awayProb ?? null;
+      const impliedHome = homeOdds === '' ? null : oddsToProb(Number(homeOdds));
+      const impliedAway = awayOdds === '' ? null : oddsToProb(Number(awayOdds));
+      const modelEvHome = homeOdds === '' ? null : expectedValue(modelHomeProb, Number(homeOdds));
+      const modelEvAway = awayOdds === '' ? null : expectedValue(modelAwayProb, Number(awayOdds));
+      const consensusEvHome = homeOdds === '' || consensusHomeProb === null ? null : expectedValue(consensusHomeProb, Number(homeOdds));
+      const consensusEvAway = awayOdds === '' || consensusAwayProb === null ? null : expectedValue(consensusAwayProb, Number(awayOdds));
+
+      const analytics = `
+        <div class="ev-metrics">
+          <p><strong>Model Home Win %:</strong> ${formatPercent(modelHomeProb)}</p>
+          <p><strong>Consensus Home Win %:</strong> ${formatPercent(consensusHomeProb)}</p>
+          <p><strong>Best Market Home ML:</strong> ${formatMoneyline(consensus?.bestHomeMoneyline ?? null)} ${consensus?.bestHomeMoneylineBook ? `(${consensus.bestHomeMoneylineBook})` : ''}</p>
+          <p><strong>Best Market Away ML:</strong> ${formatMoneyline(consensus?.bestAwayMoneyline ?? null)} ${consensus?.bestAwayMoneylineBook ? `(${consensus.bestAwayMoneylineBook})` : ''}</p>
+        </div>
+      `;
+
+      const inputsHtml = `
+        <div class="ev-inputs">
+          <label> Your Home ML
+            <input type="number" step="1" data-ev-input="home" data-game="${key}" value="${homeOdds === '' ? '' : homeOdds}" placeholder="-110" />
+          </label>
+          <p class="ev-results">Model EV: ${formatEv(modelEvHome)} | Consensus EV: ${formatEv(consensusEvHome)}</p>
+          <label> Your Away ML
+            <input type="number" step="1" data-ev-input="away" data-game="${key}" value="${awayOdds === '' ? '' : awayOdds}" placeholder="+120" />
+          </label>
+          <p class="ev-results">Model EV: ${formatEv(modelEvAway)} | Consensus EV: ${formatEv(consensusEvAway)}</p>
+        </div>
+      `;
+
+      const dateLabel = game.date ? new Date(game.date).toISOString().slice(0, 10) : '';
+
+      return `
+        <article class="ev-game">
+          <header>
+            <h3>${game.awayTeam} @ ${game.homeTeam}${dateLabel ? ` · ${dateLabel}` : ''}</h3>
+          </header>
+          <div class="ev-body">
+            ${analytics}
+            ${inputsHtml}
+          </div>
+        </article>
+      `;
+    })
+    .join('');
+
+  container.innerHTML = sections || '<p class="hint">No games with model projections available.</p>';
+  attachEvInputHandlers();
+};
+
+const renderCustomSection = () => {
+  const select = document.getElementById('customGameSelect');
+  if (select) {
+    const previous = select.value;
+    const options = (state.predictions || []).map((game) => {
+      const key = buildPredictionKey(game.homeTeam, game.awayTeam);
+      const label = `${game.awayTeam} @ ${game.homeTeam}`;
+      return `<option value="${key}">${label}</option>`;
+    }).join('');
+    select.innerHTML = options || '<option value="">Run the model to populate games</option>';
+    if (previous && state.predictionMap.has(previous)) {
+      select.value = previous;
+    }
+  }
+
+  const resultsContainer = document.getElementById('customResults');
+  if (!resultsContainer) return;
+
+  if (!state.customBets.length) {
+    resultsContainer.innerHTML = '<p class="hint">Add custom wagers to compare against the model and market.</p>';
+    return;
+  }
+
+  const rows = state.customBets
+    .map((bet, index) => {
+      const prediction = state.predictionMap.get(bet.gameKey);
+      if (!prediction) return '';
+      const consensus = computeConsensusForGame(bet.gameKey);
+      const isHome = bet.betType === 'home_ml';
+      const gameLabel = `${prediction.awayTeam} @ ${prediction.homeTeam}`;
+      const betLabel = isHome ? `${prediction.homeTeam} ML` : `${prediction.awayTeam} ML`;
+      const modelProb = isHome ? prediction.homeWinProb : prediction.awayWinProb;
+      const consensusProb = consensus ? (isHome ? consensus.homeProb : consensus.awayProb) : null;
+      const bestMarket = consensus ? (isHome ? consensus.bestHomeMoneyline : consensus.bestAwayMoneyline) : null;
+      const implied = oddsToProb(bet.odds);
+      const modelEdge = implied === null || modelProb === null ? null : modelProb - implied;
+      const consensusEdge = implied === null || consensusProb === null ? null : consensusProb - implied;
+      const modelEv = implied === null || modelProb === null ? null : expectedValue(modelProb, bet.odds);
+      const consensusEv = implied === null || consensusProb === null ? null : expectedValue(consensusProb, bet.odds);
       return `
       <tr>
-        <td data-sort-value="${entry.side}">${entry.bet}</td>
-        <td data-sort-value="${entry.odds}">${formatMoneyline(entry.odds)}</td>
-        <td data-sort-value="${entry.modelProb}">${modelPercent}</td>
-        <td data-sort-value="${entry.impliedProb ?? ''}">${impliedPercent}</td>
-        <td data-sort-value="${entry.edge ?? ''}">${edgePercent}</td>
-        <td data-sort-value="${entry.ev ?? ''}">${evValue}</td>
+        <td>${betLabel} (${gameLabel})</td>
+        <td>${formatMoneyline(bet.odds)}</td>
+        <td>${formatPercent(modelProb)}</td>
+        <td>${formatPercent(modelEdge)}</td>
+        <td>${formatEv(modelEv)}</td>
+        <td>${formatPercent(consensusProb)}</td>
+        <td>${formatPercent(consensusEdge)}</td>
+        <td>${formatEv(consensusEv)}</td>
+        <td>${formatMoneyline(bestMarket)}</td>
+        <td><button type="button" data-remove-bet="${index}">Remove</button></td>
       </tr>
     `;
     })
     .join('');
 
-  return `
-    <section class="collapsible" data-section="ev">
-      <div class="collapsible-header" role="button" tabindex="0" aria-expanded="true">Best EV Opportunities</div>
-      <div class="collapsible-body">
-        <p class="hint explanation">Expected value (EV) uses the model's win probability and your sportsbook odds to estimate profit per $1 risked. Positive EV indicates a potentially +EV wager.</p>
-        <table class="data-table" data-sortable="true">
-          <thead>
-            <tr>
-              <th data-sort-key="bet" data-sort-type="text">Bet</th>
-              <th data-sort-key="odds" data-sort-type="number">Odds</th>
-              <th data-sort-key="model" data-sort-type="number">Model Win %</th>
-              <th data-sort-key="implied" data-sort-type="number">Market Win %</th>
-              <th data-sort-key="edge" data-sort-type="number">Edge</th>
-              <th data-sort-key="ev" data-sort-type="number">EV (per $1)</th>
-            </tr>
-          </thead>
-          <tbody>${rows}</tbody>
-        </table>
-      </div>
-    </section>
+  resultsContainer.innerHTML = `
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Bet</th>
+          <th>Your Odds</th>
+          <th>Model Win %</th>
+          <th>Model Edge</th>
+          <th>Model EV</th>
+          <th>Market Win %</th>
+          <th>Market Edge</th>
+          <th>Market EV</th>
+          <th>Best Market Odds</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>
   `;
+
+  document.querySelectorAll('[data-remove-bet]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const idx = Number(button.getAttribute('data-remove-bet'));
+      state.customBets.splice(idx, 1);
+      renderCustomSection();
+    });
+  });
+};
+
+const renderEloSection = () => {
+  const output = document.getElementById('eloOutputs');
+  if (!output) return;
+  const ratingsHtml = renderRatingsTable(state.ratings || [], state.autoMeta);
+  const predictionsHtml = renderPredictionsTable(state.predictions || []);
+  output.innerHTML = `${ratingsHtml}${predictionsHtml}`;
+  initInteractiveSections(output);
+};
+
+const attachEvInputHandlers = () => {
+  document.querySelectorAll('[data-ev-input]').forEach((input) => {
+    input.addEventListener('input', (event) => {
+      const target = event.target;
+      const side = target.getAttribute('data-ev-input');
+      const gameKey = target.getAttribute('data-game');
+      if (!gameKey || !side) return;
+      const value = target.value;
+      const parsed = value === '' ? '' : Number(value);
+      if (value !== '' && !Number.isFinite(parsed)) {
+        return;
+      }
+      const existing = state.evInputs[gameKey] || { home: '', away: '' };
+      existing[side] = value === '' ? '' : parsed;
+      state.evInputs[gameKey] = existing;
+      renderEvCalculator();
+    });
+  });
 };
 
 const toggleSection = (header, body) => {
@@ -961,12 +1041,121 @@ const initInteractiveSections = (root) => {
   initSortableTables(root);
 };
 
+const setAutoStatus = (message, variant = 'status') => {
+  const el = document.getElementById('autoStatus');
+  if (!el) return;
+  el.textContent = message;
+  el.className = `hint ${variant}`;
+};
+
+const handleCustomBetSubmit = (event) => {
+  event.preventDefault();
+  if (!state.predictions || !state.predictions.length) {
+    alert('Run the Elo model first.');
+    return;
+  }
+
+  const gameSelect = document.getElementById('customGameSelect');
+  const betTypeSelect = document.getElementById('customBetType');
+  const oddsInput = document.getElementById('customOddsInput');
+  if (!gameSelect || !betTypeSelect || !oddsInput) return;
+
+  const gameKey = gameSelect.value;
+  const betType = betTypeSelect.value;
+  const oddsValue = Number(oddsInput.value);
+
+  if (!gameKey || !state.predictionMap.has(gameKey)) {
+    alert('Select a valid game.');
+    return;
+  }
+  if (!Number.isFinite(oddsValue)) {
+    alert('Enter numeric American odds (e.g. -110 or +120).');
+    return;
+  }
+
+  const prediction = state.predictionMap.get(gameKey);
+  const consensus = computeConsensusForGame(gameKey);
+  if (!prediction) {
+    alert('Selected game is not available.');
+    return;
+  }
+
+  const record = {
+    gameKey,
+    betType,
+    odds: oddsValue,
+  };
+  state.customBets.push(record);
+  renderCustomSection();
+  oddsInput.value = '';
+};
+
+const fetchOddsFromApi = async () => {
+  if (!state.apiKey) {
+    state.apiStatus = 'Enter your The Odds API key before fetching.';
+    updateApiStatus();
+    return;
+  }
+
+  state.apiLoading = true;
+  state.apiStatus = 'Loading sportsbook odds…';
+  updateApiStatus();
+
+  try {
+    const url = new URL('https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds/');
+    url.searchParams.set('apiKey', state.apiKey);
+    url.searchParams.set('regions', 'us');
+    url.searchParams.set('markets', 'h2h');
+    url.searchParams.set('oddsFormat', 'american');
+    url.searchParams.set('dateFormat', 'iso');
+
+    const response = await fetch(url.toString());
+    if (!response.ok) {
+      throw new Error(`Request failed (${response.status})`);
+    }
+    const data = await response.json();
+    state.sportsbookData = Array.isArray(data) ? data : [];
+    state.consensusMap = buildConsensusMap(state.sportsbookData);
+    state.apiStatus = `Loaded ${state.sportsbookData.length} games from The Odds API.`;
+    renderEvCalculator();
+    renderCustomSection();
+  } catch (error) {
+    console.error(error);
+    state.apiStatus = `Failed to load odds: ${error.message}`;
+  } finally {
+    state.apiLoading = false;
+    updateApiStatus();
+  }
+};
+
+const updateApiStatus = () => {
+  const el = document.getElementById('apiStatus');
+  if (!el) return;
+  el.textContent = state.apiStatus || '';
+  el.className = `hint ${state.apiLoading ? 'status' : 'status'}`;
+};
+
+const setActiveTab = (tabId) => {
+  state.activeTab = tabId;
+  document.querySelectorAll('.tab-button').forEach((button) => {
+    const isActive = button.getAttribute('data-tab') === tabId;
+    button.classList.toggle('active', isActive);
+  });
+  document.querySelectorAll('.tab-section').forEach((section) => {
+    section.classList.toggle('active', section.id === `tab-${tabId}`);
+  });
+};
+
 const runModel = async () => {
-  const outputs = document.getElementById('outputs');
-  outputs.innerHTML = '<p class="status">Running Elo calculations…</p>';
+  const outputs = document.getElementById('eloOutputs');
+  if (outputs) {
+    outputs.innerHTML = '<p class="status">Running Elo calculations…</p>';
+  }
 
   if (!state.games || !state.upcoming) {
-    outputs.innerHTML = '<p class="error">Please provide games and upcoming schedule data (upload or auto-fetch).</p>';
+    if (outputs) {
+      outputs.innerHTML = '<p class="error">Please provide games and upcoming schedule data (upload or auto-fetch).</p>';
+    }
     return;
   }
 
@@ -976,32 +1165,39 @@ const runModel = async () => {
     const market = state.market ? normalizeMarket(state.market) : [];
 
     if (!games.length) {
-      outputs.innerHTML = '<p class="error">No completed games found after filtering (season mismatch?).</p>';
+      if (outputs) {
+        outputs.innerHTML = '<p class="error">No completed games found after filtering (season mismatch?).</p>';
+      }
       return;
     }
 
     const { ratings, teams } = computeElo(games, DEFAULT_CONFIG);
     let predictions = mergeMarket(predictGames(upcoming, teams, DEFAULT_CONFIG), market);
-    predictions = applyBookLinesToPredictions(predictions, state.books);
-    const evBets = calculateEvBets(predictions, state.books);
 
-    outputs.innerHTML = `
-      ${renderRatingsTable(ratings, state.autoMeta)}
-      ${renderPredictionsTable(predictions)}
-      ${renderEvTable(evBets)}
-    `;
-    initInteractiveSections(outputs);
+    state.ratings = ratings;
+    state.predictions = predictions;
+    state.predictionMap = buildPredictionMap(predictions);
+    const filteredInputs = {};
+    state.predictionMap.forEach((_, key) => {
+      if (state.evInputs[key]) {
+        filteredInputs[key] = state.evInputs[key];
+      }
+    });
+    state.evInputs = filteredInputs;
+    state.customBets = state.customBets.filter((bet) => state.predictionMap.has(bet.gameKey));
+
+    renderEloSection();
+    renderEvCalculator();
+    renderCustomSection();
   } catch (err) {
     console.error(err);
-    outputs.innerHTML = `<p class="error">Error running model: ${err.message}</p>`;
+    if (outputs) {
+      outputs.innerHTML = `<p class="error">Error running model: ${err.message}</p>`;
+    }
   }
 };
 
 const getUploadMessage = (key, data, fileName) => {
-  if (key === 'books') {
-    const count = Array.isArray(data) ? data.length : 0;
-    return count ? `Loaded ${count} sportsbook entries (${fileName})` : `Loaded: ${fileName}`;
-  }
   if (Array.isArray(data)) {
     return `Loaded ${data.length} rows (${fileName})`;
   }
@@ -1010,11 +1206,13 @@ const getUploadMessage = (key, data, fileName) => {
 
 const wireFileInput = (inputId, key, parser = parseCsvFile, transform = (value) => value, options = {}) => {
   const input = document.getElementById(inputId);
-  const label = input.closest('.file-input');
+  const label = input ? input.closest('.file-input') : null;
   const desc = label ? label.querySelector('.input-desc') : null;
   if (desc && !desc.dataset.defaultText) {
     desc.dataset.defaultText = desc.textContent.trim();
   }
+
+  if (!input) return;
 
   input.addEventListener('change', async (event) => {
     const [file] = event.target.files;
@@ -1051,70 +1249,49 @@ const wireFileInput = (inputId, key, parser = parseCsvFile, transform = (value) 
   });
 };
 
-const fetchAutoData = async () => {
-  const seasonsInput = document.getElementById('seasonInput');
-  const seasons = parseSeasonList(seasonsInput.value);
-  if (!seasons.length) {
-    throw new Error('Enter at least one season (e.g., 2010-2024).');
-  }
-
-  const response = await fetch(`${HABITATRING_PROXY_URL}?t=${Date.now()}`, { cache: 'no-store' });
-  if (!response.ok) {
-    throw new Error(`Failed to download games CSV (status ${response.status}).`);
-  }
-  const rawText = await response.text();
-  const lastUpdated = extractPublishedTime(rawText);
-  const csvText = stripProxyEnvelope(rawText);
-  const rows = parseCsvString(csvText);
-
-  const seasonSet = new Set(seasons);
-  const filtered = rows.filter((row) => {
-    const seasonVal = Number(row.season);
-    if (!Number.isFinite(seasonVal) || !seasonSet.has(seasonVal)) return false;
-    const gameType = (row.game_type || '').toUpperCase();
-    return gameType !== 'PRE';
-  });
-
-  if (!filtered.length) {
-    throw new Error('No games found for requested seasons.');
-  }
-
-  const completed = filtered.filter((row) => row.home_score !== '' && row.away_score !== '');
-  const upcoming = filtered.filter((row) => row.home_score === '' || row.away_score === '');
-
-  completed.forEach((row) => {
-    if (!('neutral_site' in row)) {
-      row.neutral_site = String(row.location || '').toLowerCase() === 'neutral';
-    }
-  });
-  upcoming.forEach((row) => {
-    if (!('neutral_site' in row)) {
-      row.neutral_site = String(row.location || '').toLowerCase() === 'neutral';
-    }
-  });
-
-  state.games = completed;
-  state.upcoming = upcoming;
-  state.market = upcoming;
-  state.autoMeta = {
-    seasons,
-    lastUpdated,
-    completedGames: completed.length,
-    upcomingGames: upcoming.length,
-  };
-
-  setFileInputBadge('gamesFile', `Auto-loaded ${completed.length} games`);
-  setFileInputBadge('upcomingFile', `Auto-loaded ${upcoming.length} fixtures`);
-  setFileInputBadge('marketFile', 'Market data derived from nflverse lines');
-};
-
 const handleAutoFetch = async () => {
+  const seasonsInput = document.getElementById('seasonInput');
+  const seasons = parseSeasonList(seasonsInput ? seasonsInput.value : '');
+  if (!seasons.length) {
+    setAutoStatus('Enter one or more seasons to auto-fetch.', 'error');
+    return;
+  }
+
+  setAutoStatus('Downloading schedule and results…');
   try {
-    setAutoStatus('Downloading schedule and results…');
-    await fetchAutoData();
-    const { completedGames, upcomingGames } = state.autoMeta || {};
-    setAutoStatus(`Auto data ready (${completedGames ?? 0} completed, ${upcomingGames ?? 0} upcoming). Click Run Model.`, 'status');
-    runModel();
+    const response = await fetch(`${HABITATRING_PROXY_URL}?t=${Date.now()}`, { cache: 'no-store' });
+    if (!response.ok) {
+      throw new Error(`Failed to download games CSV (status ${response.status})`);
+    }
+    const rawText = await response.text();
+    const lastUpdated = extractPublishedTime(rawText);
+    const csvText = stripProxyEnvelope(rawText);
+    const rows = Papa.parse(csvText, {
+      header: true,
+      dynamicTyping: false,
+      skipEmptyLines: true,
+    }).data;
+
+    const seasonSet = new Set(seasons);
+    const filtered = rows.filter((row) => seasonSet.has(Number(row.season)) && String(row.game_type || '').toUpperCase() !== 'PRE');
+
+    const completed = filtered.filter((row) => row.home_score !== '' && row.away_score !== '');
+    const upcoming = filtered.filter((row) => row.home_score === '' || row.away_score === '');
+
+    state.games = completed;
+    state.upcoming = upcoming;
+    state.market = [];
+    state.autoMeta = {
+      seasons,
+      lastUpdated,
+      completedGames: completed.length,
+      upcomingGames: upcoming.length,
+    };
+
+    setAutoStatus(`Auto data ready (${completed.length} completed, ${upcoming.length} upcoming). Click Run Model.`, 'status');
+    renderEloSection();
+    renderEvCalculator();
+    renderCustomSection();
   } catch (err) {
     console.error(err);
     state.autoMeta = null;
@@ -1122,14 +1299,38 @@ const handleAutoFetch = async () => {
   }
 };
 
+const initTabs = () => {
+  document.querySelectorAll('.tab-button').forEach((button) => {
+    button.addEventListener('click', () => {
+      const tabId = button.getAttribute('data-tab');
+      setActiveTab(tabId);
+    });
+  });
+  setActiveTab(state.activeTab);
+};
+
 const init = () => {
+  initTabs();
+
   wireFileInput('gamesFile', 'games');
   wireFileInput('upcomingFile', 'upcoming');
   wireFileInput('marketFile', 'market');
-  wireFileInput('booksFile', 'books', parseJsonFile, extractGameLines, { resetAutoMeta: false });
-  document.getElementById('runBtn').addEventListener('click', runModel);
-  document.getElementById('autoFetchBtn').addEventListener('click', handleAutoFetch);
+
+  document.getElementById('runBtn')?.addEventListener('click', runModel);
+  document.getElementById('autoFetchBtn')?.addEventListener('click', handleAutoFetch);
+
+  const apiKeyInput = document.getElementById('apiKeyInput');
+  if (apiKeyInput) {
+    apiKeyInput.addEventListener('input', (event) => {
+      state.apiKey = event.target.value.trim();
+    });
+  }
+  document.getElementById('loadOddsBtn')?.addEventListener('click', fetchOddsFromApi);
+
+  document.getElementById('customBetForm')?.addEventListener('submit', handleCustomBetSubmit);
+
   setAutoStatus('Awaiting auto fetch (optional).', 'status');
+  updateApiStatus();
 };
 
 document.addEventListener('DOMContentLoaded', init);
