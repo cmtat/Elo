@@ -413,76 +413,197 @@ const describeAutoMeta = (meta) => {
 
 const renderRatingsTable = (ratings, meta) => {
   const rows = ratings
-    .map(
-      (row, index) => `
+    .map((row, index) => {
+      const lastGame = row.lastGameDate ? new Date(row.lastGameDate) : null;
+      const lastGameDisplay = lastGame ? lastGame.toISOString().slice(0, 10) : '-';
+      const lastGameValue = lastGame ? lastGame.getTime() : '';
+      return `
         <tr>
-          <td>${index + 1}</td>
-          <td>${row.team}</td>
-          <td>${formatNumber(row.rating, 1)}</td>
-          <td>${row.gamesPlayed}</td>
-          <td>${row.lastGameDate ? new Date(row.lastGameDate).toISOString().slice(0, 10) : '-'}</td>
+          <td data-sort-value="${index + 1}">${index + 1}</td>
+          <td data-sort-value="${row.team}">${row.team}</td>
+          <td data-sort-value="${row.rating}">${formatNumber(row.rating, 1)}</td>
+          <td data-sort-value="${row.gamesPlayed}">${row.gamesPlayed}</td>
+          <td data-sort-value="${lastGameValue}">${lastGameDisplay}</td>
         </tr>
-      `
-    )
+      `;
+    })
     .join('');
   const metaNote = describeAutoMeta(meta);
   return `
-    <section>
-      <h2>Team Ratings</h2>
-      ${metaNote ? `<p class="status meta">${metaNote}</p>` : ''}
-      <table class="data-table">
-        <thead>
-          <tr>
-            <th>#</th>
-            <th>Team</th>
-            <th>Rating</th>
-            <th>Games</th>
-            <th>Last Game</th>
-          </tr>
-        </thead>
-        <tbody>${rows || '<tr><td colspan="5">No ratings computed.</td></tr>'}</tbody>
-      </table>
+    <section class="collapsible" data-section="ratings">
+      <div class="collapsible-header" role="button" tabindex="0" aria-expanded="true">Team Ratings</div>
+      <div class="collapsible-body">
+        ${metaNote ? `<p class="status meta">${metaNote}</p>` : ''}
+        <table class="data-table" data-sortable="true">
+          <thead>
+            <tr>
+              <th data-sort-key="rank" data-sort-type="number">#</th>
+              <th data-sort-key="team" data-sort-type="text">Team</th>
+              <th data-sort-key="rating" data-sort-type="number">Rating</th>
+              <th data-sort-key="games" data-sort-type="number">Games</th>
+              <th data-sort-key="last" data-sort-type="number">Last Game</th>
+            </tr>
+          </thead>
+          <tbody>${rows || '<tr><td colspan="5">No ratings computed.</td></tr>'}</tbody>
+        </table>
+      </div>
     </section>
   `;
 };
 
+
 const renderPredictionsTable = (predictions) => {
   const rows = predictions
-    .map((row) => `
+    .map((row) => {
+      const fairMl = row.homeFairMoneyline ?? '';
+      const marketSpread = row.marketSpread ?? '';
+      const spreadEdge = row.homeSpreadEdge ?? '';
+      const homeMl = row.homeMoneyline ?? '';
+      const mlEdge = row.homeMoneylineEdge ?? '';
+      return `
       <tr>
-        <td>${row.homeTeam}</td>
-        <td>${row.awayTeam}</td>
-        <td>${formatPercent(row.homeWinProb)}</td>
-        <td>${formatNumber(row.modelSpread, 1)}</td>
-        <td>${formatMoneyline(row.homeFairMoneyline)}</td>
-        <td>${row.marketSpread ?? '-'}</td>
-        <td>${row.homeSpreadEdge === null ? '-' : formatNumber(row.homeSpreadEdge, 1)}</td>
-        <td>${row.homeMoneyline === null ? '-' : formatMoneyline(row.homeMoneyline)}</td>
-        <td>${row.homeMoneylineEdge === null ? '-' : formatPercent(row.homeMoneylineEdge)}</td>
+        <td data-sort-value="${row.homeTeam}">${row.homeTeam}</td>
+        <td data-sort-value="${row.awayTeam}">${row.awayTeam}</td>
+        <td data-sort-value="${row.homeWinProb}">${formatPercent(row.homeWinProb)}</td>
+        <td data-sort-value="${row.modelSpread}">${formatNumber(row.modelSpread, 1)}</td>
+        <td data-sort-value="${fairMl}">${formatMoneyline(row.homeFairMoneyline)}</td>
+        <td data-sort-value="${marketSpread}">${row.marketSpread ?? '-'}</td>
+        <td data-sort-value="${spreadEdge}">${row.homeSpreadEdge === null ? '-' : formatNumber(row.homeSpreadEdge, 1)}</td>
+        <td data-sort-value="${homeMl}">${row.homeMoneyline === null ? '-' : formatMoneyline(row.homeMoneyline)}</td>
+        <td data-sort-value="${mlEdge}">${row.homeMoneylineEdge === null ? '-' : formatPercent(row.homeMoneylineEdge)}</td>
       </tr>
-    `)
+    `;
+    })
     .join('');
   return `
-    <section>
-      <h2>Upcoming Games</h2>
-      <table class="data-table">
-        <thead>
-          <tr>
-            <th>Home</th>
-            <th>Away</th>
-            <th>Home Win %</th>
-            <th>Model Spread</th>
-            <th>Fair ML</th>
-            <th>Market Spread</th>
-            <th>Spread Edge</th>
-            <th>Home ML</th>
-            <th>ML Edge</th>
-          </tr>
-        </thead>
-        <tbody>${rows || '<tr><td colspan="9">No upcoming games provided.</td></tr>'}</tbody>
-      </table>
+    <section class="collapsible" data-section="predictions">
+      <div class="collapsible-header" role="button" tabindex="0" aria-expanded="true">Upcoming Games</div>
+      <div class="collapsible-body">
+        <table class="data-table" data-sortable="true">
+          <thead>
+            <tr>
+              <th data-sort-key="home" data-sort-type="text">Home</th>
+              <th data-sort-key="away" data-sort-type="text">Away</th>
+              <th data-sort-key="prob" data-sort-type="number">Home Win %</th>
+              <th data-sort-key="spread" data-sort-type="number">Model Spread</th>
+              <th data-sort-key="fairml" data-sort-type="number">Fair ML</th>
+              <th data-sort-key="marketspread" data-sort-type="number">Market Spread</th>
+              <th data-sort-key="spreadedge" data-sort-type="number">Spread Edge</th>
+              <th data-sort-key="ml" data-sort-type="number">Home ML</th>
+              <th data-sort-key="mledge" data-sort-type="number">ML Edge</th>
+            </tr>
+          </thead>
+          <tbody>${rows || '<tr><td colspan="9">No upcoming games provided.</td></tr>'}</tbody>
+        </table>
+      </div>
     </section>
   `;
+};
+
+
+const toggleSection = (header, body) => {
+  const isExpanded = header.getAttribute('aria-expanded') === 'true';
+  const nextState = !isExpanded;
+  header.setAttribute('aria-expanded', String(nextState));
+  if (nextState) {
+    body.removeAttribute('hidden');
+  } else {
+    body.setAttribute('hidden', '');
+  }
+};
+
+const initCollapsibles = (root) => {
+  const sections = root.querySelectorAll('.collapsible');
+  sections.forEach((section) => {
+    const header = section.querySelector('.collapsible-header');
+    const body = section.querySelector('.collapsible-body');
+    if (!header || !body) return;
+    header.setAttribute('aria-expanded', header.getAttribute('aria-expanded') ?? 'true');
+    body.removeAttribute('hidden');
+    const toggle = () => toggleSection(header, body);
+    header.addEventListener('click', (event) => {
+      event.preventDefault();
+      toggle();
+    });
+    header.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        toggle();
+      }
+    });
+  });
+};
+
+const parseSortValue = (cell, type) => {
+  const raw = cell.getAttribute('data-sort-value');
+  if (raw === null) {
+    const text = cell.textContent.trim();
+    if (type === 'number') {
+      const num = Number(text);
+      return Number.isNaN(num) ? Number.NEGATIVE_INFINITY : num;
+    }
+    return text.toLowerCase();
+  }
+  if (type === 'number') {
+    if (raw === '' || raw === 'null' || raw === 'undefined') {
+      return Number.NEGATIVE_INFINITY;
+    }
+    const num = Number(raw);
+    return Number.isNaN(num) ? Number.NEGATIVE_INFINITY : num;
+  }
+  return String(raw).toLowerCase();
+};
+
+const sortTable = (table, columnIndex, type, direction) => {
+  const tbody = table.tBodies[0];
+  if (!tbody) return;
+  const rows = Array.from(tbody.rows);
+  rows.sort((rowA, rowB) => {
+    const aVal = parseSortValue(rowA.cells[columnIndex], type);
+    const bVal = parseSortValue(rowB.cells[columnIndex], type);
+    if (aVal === bVal) return 0;
+    if (aVal > bVal) return direction === 'asc' ? 1 : -1;
+    return direction === 'asc' ? -1 : 1;
+  });
+  rows.forEach((row) => tbody.appendChild(row));
+};
+
+const initSortableTables = (root) => {
+  const tables = root.querySelectorAll('table[data-sortable="true"]');
+  tables.forEach((table) => {
+    const headers = table.querySelectorAll('th[data-sort-key]');
+    headers.forEach((th, index) => {
+      const type = th.dataset.sortType || 'text';
+      th.setAttribute('role', 'button');
+      th.setAttribute('tabindex', '0');
+      const handleSort = () => {
+        const current = th.getAttribute('data-sort-direction');
+        const nextDirection = current === 'asc' ? 'desc' : 'asc';
+        headers.forEach((other) => {
+          if (other !== th) {
+            other.removeAttribute('data-sort-direction');
+          }
+        });
+        th.setAttribute('data-sort-direction', nextDirection);
+        sortTable(table, index, type, nextDirection);
+      };
+      th.addEventListener('click', (event) => {
+        event.preventDefault();
+        handleSort();
+      });
+      th.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          handleSort();
+        }
+      });
+    });
+  });
+};
+
+const initInteractiveSections = (root) => {
+  initCollapsibles(root);
+  initSortableTables(root);
 };
 
 const runModel = async () => {
@@ -511,6 +632,7 @@ const runModel = async () => {
       ${renderRatingsTable(ratings, state.autoMeta)}
       ${renderPredictionsTable(predictions)}
     `;
+    initInteractiveSections(outputs);
   } catch (err) {
     console.error(err);
     outputs.innerHTML = `<p class="error">Error running model: ${err.message}</p>`;
