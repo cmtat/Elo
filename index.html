@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>NFL Elo Model (Client-side)</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header>
+    <h1>NFL Elo / Power Ratings</h1>
+    <p>Client-side Elo model. Drop CSVs, tweak config, and get predictions and edges. Free to host on GitHub Pages.</p>
+  </header>
+
+  <section class="card">
+    <h2>1) Upload your data</h2>
+    <div class="uploader">
+      <label>games.csv <input type="file" id="gamesFile" accept=".csv" /></label>
+      <label>upcoming_week.csv <input type="file" id="upcomingFile" accept=".csv" /></label>
+      <label>market_lines.csv (optional) <input type="file" id="marketFile" accept=".csv" /></label>
+    </div>
+    <button id="runBtn">Run model</button>
+  </section>
+
+  <section class="card">
+    <h2>2) Config</h2>
+    <textarea id="configBox" rows="12"></textarea>
+    <div class="row">
+      <button id="loadDefault">Load default config</button>
+      <button id="downloadConfig">Download config.json</button>
+      <input type="file" id="configUpload" accept=".json" />
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Outputs</h2>
+    <div id="outputs">
+      <div>
+        <h3>Current Ratings</h3>
+        <div id="ratingsTable"></div>
+      </div>
+      <div>
+        <h3>Predictions</h3>
+        <div id="predsTable"></div>
+      </div>
+      <div>
+        <h3>Edges vs Market</h3>
+        <div id="edgesTable"></div>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <p>Made for free static hosting. No server required.</p>
+  </footer>
+
+  <script src="papaparse.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
