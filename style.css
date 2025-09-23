@@ -443,3 +443,12 @@ footer {
     flex-direction: column;
   }
 }
+
+.dual-input {
+  display: flex;
+  gap: 8px;
+}
+
+.dual-input input {
+  flex: 1;
+}
