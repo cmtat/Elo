@@ -13,6 +13,29 @@ const DEFAULT_CONFIG = {
   spreadFactor: 25,
 };
 
+const HEADER_TOOLTIPS = {
+  ratings: {
+    rank: 'Model Elo rank (1 = highest rating).',
+    team: 'Team abbreviation.',
+    rating: 'Current Elo rating after processing all completed games.',
+    games: 'Number of games played in the dataset for this team.',
+    last: 'Date of the most recent game contributing to the rating.',
+  },
+  predictions: {
+    home: 'Home team abbreviation.',
+    away: 'Away team abbreviation.',
+    prob: 'Model probability that the home team wins.',
+    spread: 'Model fair spread (negative favors the home team).',
+    fairml: 'Model fair moneyline for the home team based on win probability.',
+    marketspread: 'Sportsbook market spread for the home team.',
+    spreadedge: 'Market spread minus model spread (positive = model likes the home side).',
+    ml: 'Sportsbook home moneyline price.',
+    mledge: 'Home win probability minus implied market probability; positive = home moneyline value.',
+  },
+};
+
+const getHeaderTooltip = (section, key) => (HEADER_TOOLTIPS[section] && HEADER_TOOLTIPS[section][key]) || '';
+
 const HABITATRING_PROXY_URL = 'https://r.jina.ai/http://www.habitatring.com/games.csv';
 
 const toNumber = (value) => {
@@ -437,11 +460,11 @@ const renderRatingsTable = (ratings, meta) => {
         <table class="data-table" data-sortable="true">
           <thead>
             <tr>
-              <th data-sort-key="rank" data-sort-type="number">#</th>
-              <th data-sort-key="team" data-sort-type="text">Team</th>
-              <th data-sort-key="rating" data-sort-type="number">Rating</th>
-              <th data-sort-key="games" data-sort-type="number">Games</th>
-              <th data-sort-key="last" data-sort-type="number">Last Game</th>
+              <th data-sort-key="rank" data-sort-type="number" title="${getHeaderTooltip('ratings','rank')}">#</th>
+              <th data-sort-key="team" data-sort-type="text" title="${getHeaderTooltip('ratings','team')}">Team</th>
+              <th data-sort-key="rating" data-sort-type="number" title="${getHeaderTooltip('ratings','rating')}">Rating</th>
+              <th data-sort-key="games" data-sort-type="number" title="${getHeaderTooltip('ratings','games')}">Games</th>
+              <th data-sort-key="last" data-sort-type="number" title="${getHeaderTooltip('ratings','last')}">Last Game</th>
             </tr>
           </thead>
           <tbody>${rows || '<tr><td colspan="5">No ratings computed.</td></tr>'}</tbody>
@@ -453,7 +476,14 @@ const renderRatingsTable = (ratings, meta) => {
 
 
 const renderPredictionsTable = (predictions) => {
-  const rows = predictions
+  const filtered = predictions.filter((row) => {
+    const hasSpread = row.marketSpread !== null && row.marketSpread !== undefined;
+    const hasSpreadEdge = row.homeSpreadEdge !== null && row.homeSpreadEdge !== undefined;
+    const hasMoneyline = row.homeMoneyline !== null && row.homeMoneyline !== undefined;
+    const hasMoneylineEdge = row.homeMoneylineEdge !== null && row.homeMoneylineEdge !== undefined;
+    return (hasSpread && hasSpreadEdge) || (hasMoneyline && hasMoneylineEdge);
+  });
+  const rows = filtered
     .map((row) => {
       const fairMl = row.homeFairMoneyline ?? '';
       const marketSpread = row.marketSpread ?? '';
@@ -482,18 +512,18 @@ const renderPredictionsTable = (predictions) => {
         <table class="data-table" data-sortable="true">
           <thead>
             <tr>
-              <th data-sort-key="home" data-sort-type="text">Home</th>
-              <th data-sort-key="away" data-sort-type="text">Away</th>
-              <th data-sort-key="prob" data-sort-type="number">Home Win %</th>
-              <th data-sort-key="spread" data-sort-type="number">Model Spread</th>
-              <th data-sort-key="fairml" data-sort-type="number">Fair ML</th>
-              <th data-sort-key="marketspread" data-sort-type="number">Market Spread</th>
-              <th data-sort-key="spreadedge" data-sort-type="number">Spread Edge</th>
-              <th data-sort-key="ml" data-sort-type="number">Home ML</th>
-              <th data-sort-key="mledge" data-sort-type="number">ML Edge</th>
+              <th data-sort-key="home" data-sort-type="text" title="${getHeaderTooltip('predictions','home')}">Home</th>
+              <th data-sort-key="away" data-sort-type="text" title="${getHeaderTooltip('predictions','away')}">Away</th>
+              <th data-sort-key="prob" data-sort-type="number" title="${getHeaderTooltip('predictions','prob')}">Home Win %</th>
+              <th data-sort-key="spread" data-sort-type="number" title="${getHeaderTooltip('predictions','spread')}">Model Spread</th>
+              <th data-sort-key="fairml" data-sort-type="number" title="${getHeaderTooltip('predictions','fairml')}">Fair ML</th>
+              <th data-sort-key="marketspread" data-sort-type="number" title="${getHeaderTooltip('predictions','marketspread')}">Market Spread</th>
+              <th data-sort-key="spreadedge" data-sort-type="number" title="${getHeaderTooltip('predictions','spreadedge')}">Spread Edge</th>
+              <th data-sort-key="ml" data-sort-type="number" title="${getHeaderTooltip('predictions','ml')}">Home ML</th>
+              <th data-sort-key="mledge" data-sort-type="number" title="${getHeaderTooltip('predictions','mledge')}">ML Edge</th>
             </tr>
           </thead>
-          <tbody>${rows || '<tr><td colspan="9">No upcoming games provided.</td></tr>'}</tbody>
+          <tbody>${rows || '<tr><td colspan="9">No upcoming games with market data available.</td></tr>'}</tbody>
         </table>
       </div>
     </section>
