@@ -1,3 +1,4 @@
 pandas
 numpy
 pyyaml
+nfl_data_py>=0.3.3

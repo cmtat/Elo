@@ -1,0 +1,2 @@
+game_id,date,season,week,home_team,away_team,home_score,away_score,neutral_site,home_rating_pre,away_rating_pre,home_rating_post,away_rating_post,rating_diff,expected_home_win_prob,actual_home_result,margin
+,2024-09-05,2024,1,KC,BAL,27.0,20.0,False,1500.0,1500.0,1504.2037587742545,1495.7962412257455,55.0,0.5784967523447427,1.0,7.0

@@ -1,3 +1,174 @@
-body { font-family: Arial, sans-serif; background: #0f172a; color: #e5e7eb; padding:20px;}
-h1 { color: #22d3ee; }
-button { padding:8px 12px; margin-top:10px; background:#22d3ee; border:0; border-radius:6px; cursor:pointer;}
+:root {
+  color-scheme: dark;
+  --bg: #0f172a;
+  --panel: #1e293b;
+  --accent: #22d3ee;
+  --accent-muted: rgba(34, 211, 238, 0.15);
+  --text: #e2e8f0;
+  --subtle: #94a3b8;
+  --error: #f87171;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  padding: 24px;
+  font-family: "Inter", "Segoe UI", Arial, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+header {
+  max-width: 960px;
+  margin: 0 auto 24px auto;
+  text-align: center;
+}
+
+h1 {
+  margin: 0;
+  font-size: 2.4rem;
+  color: var(--accent);
+}
+
+h2 {
+  margin-top: 0;
+  font-size: 1.4rem;
+}
+
+.tagline {
+  margin-top: 8px;
+  color: var(--subtle);
+}
+
+main {
+  flex: 1;
+  width: 100%;
+  max-width: 960px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.panel {
+  background: var(--panel);
+  border-radius: 12px;
+  padding: 20px;
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.3);
+}
+
+.hint {
+  margin: 0 0 16px 0;
+  color: var(--subtle);
+  font-size: 0.95rem;
+}
+
+.input-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.file-input {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  background: var(--accent-muted);
+  border-radius: 10px;
+}
+
+.file-input input[type="file"] {
+  width: 100%;
+  color: var(--text);
+}
+
+.input-title {
+  font-weight: 600;
+}
+
+.input-desc {
+  font-size: 0.85rem;
+  color: var(--subtle);
+}
+
+button {
+  font-size: 1rem;
+  font-weight: 600;
+  padding: 12px 22px;
+  border-radius: 10px;
+  border: none;
+  cursor: pointer;
+  background: var(--accent);
+  color: #0f172a;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+button:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 18px rgba(34, 211, 238, 0.4);
+}
+
+.outputs {
+  overflow-x: auto;
+}
+
+.status {
+  color: var(--subtle);
+}
+
+.error {
+  color: var(--error);
+}
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 12px;
+  font-size: 0.95rem;
+}
+
+.data-table thead {
+  background: rgba(148, 163, 184, 0.12);
+}
+
+.data-table th,
+.data-table td {
+  padding: 10px 12px;
+  text-align: left;
+}
+
+.data-table tbody tr:nth-child(even) {
+  background: rgba(148, 163, 184, 0.08);
+}
+
+.data-table tbody tr:hover {
+  background: rgba(34, 211, 238, 0.08);
+}
+
+footer {
+  margin-top: 32px;
+  text-align: center;
+  color: var(--subtle);
+  font-size: 0.85rem;
+}
+
+@media (max-width: 600px) {
+  body {
+    padding: 16px;
+  }
+
+  h1 {
+    font-size: 2rem;
+  }
+
+  button {
+    width: 100%;
+  }
+}

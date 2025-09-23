@@ -1,18 +1,55 @@
 <!doctype html>
-<html>
+<html lang="en">
 <head>
-  <meta charset="utf-8">
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>NFL Elo Ratings</title>
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-  <h1>NFL Elo Ratings Website</h1>
-  <p>Upload CSVs (games, upcoming, market) and see ratings + predictions.</p>
-  <input type="file" id="gamesFile" />
-  <input type="file" id="upcomingFile" />
-  <input type="file" id="marketFile" />
-  <button id="runBtn">Run Model</button>
-  <div id="outputs"></div>
+  <header>
+    <h1>NFL Elo Power Ratings</h1>
+    <p class="tagline">Upload historical results, upcoming schedule, and optional market lines to generate model projections.</p>
+  </header>
+
+  <main>
+    <section class="panel">
+      <h2>1. Upload CSV Inputs</h2>
+      <p class="hint">Use CSVs from the Python CLI or nflverse exports. Headers must include season/week/team columns.</p>
+      <div class="input-grid">
+        <label class="file-input">
+          <span class="input-title">Completed Games</span>
+          <input type="file" id="gamesFile" accept=".csv" />
+          <span class="input-desc">Finished games with scores.</span>
+        </label>
+        <label class="file-input">
+          <span class="input-title">Upcoming Schedule</span>
+          <input type="file" id="upcomingFile" accept=".csv" />
+          <span class="input-desc">Fixtures to project (season/week required).</span>
+        </label>
+        <label class="file-input">
+          <span class="input-title">Market Lines (Optional)</span>
+          <input type="file" id="marketFile" accept=".csv" />
+          <span class="input-desc">Spread and moneyline odds for edge calculations.</span>
+        </label>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>2. Run Elo Model</h2>
+      <p class="hint">Defaults: base rating 1500, K=20, regression 25%, home field +55 Elo, 25 Elo per point spread.</p>
+      <button id="runBtn">Run Model</button>
+    </section>
+
+    <section id="outputs" class="panel outputs">
+      <p>Waiting for input…</p>
+    </section>
+  </main>
+
+  <footer>
+    <p>Built with vanilla HTML/CSS/JS. All calculations run locally in your browser.</p>
+  </footer>
+
   <script src="papaparse.min.js"></script>
   <script src="app.js"></script>
 </body>

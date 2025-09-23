@@ -1,0 +1,2 @@
+game_id,season,week,date,home_team,away_team,neutral_site,home_rating,away_rating,rating_diff,model_margin,model_home_spread,home_win_prob,away_win_prob,home_fair_moneyline,away_fair_moneyline
+,2025,4,2025-09-28,DAL,NO,False,1500.0,1500.0,55.0,2.2,-2.2,0.5784967523447427,0.42150324765525726,-137,137
