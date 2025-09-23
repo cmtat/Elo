@@ -62,7 +62,7 @@ All model parameters (base rating, K-factor, home field, regression, spread conv
 
 ### 2. Static Website
 
-Open `index.html` in your browser (or host the repo with GitHub Pages). Upload CSVs exported from the CLI, or use the **Auto-Fetch** control to pull the latest `games.csv` snapshot from the nflverse (habitatring.com) repository directly in the browser. Then hit **Run Model**—everything executes locally with no backend required.
+Open `index.html` in your browser (or host the repo with GitHub Pages). Upload CSVs exported from the CLI, or use the **Auto-Fetch** control to pull the latest `games.csv` snapshot from the nflverse (habitatring.com) repository directly in the browser. You can also upload sportsbook JSON (e.g., `Extract.json`) to surface positive expected-value moneyline bets alongside the model tables. Then hit **Run Model**—everything executes locally with no backend required.
 
 ## Input Data Contracts
 

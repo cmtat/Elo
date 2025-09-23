@@ -297,3 +297,8 @@ footer {
 .collapsible-body[hidden] {
   display: none;
 }
+
+.explanation {
+  color: var(--subtle);
+  margin-bottom: 16px;
+}
