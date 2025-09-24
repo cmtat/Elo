@@ -8,6 +8,17 @@ const CONFIG = {
   movScale: 2.2,
 };
 
+const escapeHtml = (value) => {
+  if (value === null || value === undefined) return '';
+  return String(value).replace(/[&<>"']/g, (char) => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;',
+  })[char] || char);
+};
+
 const state = {
   games: null,
   upcoming: null,
@@ -622,6 +633,13 @@ const formatPercent = (value) => {
   return `${(value * 100).toFixed(1)}%`;
 };
 
+const formatSignedPercent = (value) => {
+  if (value === null || value === undefined || Number.isNaN(value)) return '-';
+  const pct = value * 100;
+  const formatted = pct.toFixed(1);
+  return `${pct > 0 ? '+' : ''}${formatted}%`;
+};
+
 const formatMoneyline = (value) => {
   if (value === null || value === undefined || Number.isNaN(value)) return '-';
   return value > 0 ? `+${value}` : String(value);
@@ -637,6 +655,13 @@ const formatSpreadLine = (value) => {
   const num = Number(value);
   if (!Number.isFinite(num)) return '-';
   const formatted = num.toFixed(1);
+  return num > 0 ? `+${formatted}` : formatted;
+};
+
+const formatSigned = (value, digits = 1) => {
+  if (value === null || value === undefined || Number.isNaN(value)) return '-';
+  const num = Number(value);
+  const formatted = num.toFixed(digits);
   return num > 0 ? `+${formatted}` : formatted;
 };
 
@@ -691,20 +716,30 @@ const renderPredictionsTable = (predictions) => {
   if (!predictions || !predictions.length) {
     return '<p class="hint">Load upcoming games (CSV or auto-fetch) before running the model.</p>';
   }
-  const rows = predictions.map((row) => `
+  const rows = predictions.map((row) => {
+    const marketSpreadDisplay = formatSpreadLine(row.marketSpread);
+    const spreadEdgeDisplay = row.homeSpreadEdge === null || row.homeSpreadEdge === undefined
+      ? '-'
+      : `${formatSigned(row.homeSpreadEdge, 1)} pts`;
+    const homeMlDisplay = formatMoneyline(row.homeMoneyline);
+    const mlEdgeDisplay = row.homeMoneylineEdge === null || row.homeMoneylineEdge === undefined
+      ? '-'
+      : formatSignedPercent(row.homeMoneylineEdge);
+    return `
       <tr>
         <td data-sort-value="${row.homeTeam}">${row.homeTeam}</td>
         <td data-sort-value="${row.awayTeam}">${row.awayTeam}</td>
         <td data-sort-value="${row.homeWinProb}">${formatPercent(row.homeWinProb)}</td>
         <td data-sort-value="${row.modelSpread}">${formatNumber(row.modelSpread, 1)}</td>
         <td data-sort-value="${row.homeFairMoneyline ?? ''}">${formatMoneyline(row.homeFairMoneyline)}</td>
-        <td data-sort-value="${row.marketSpread ?? ''}">${row.marketSpread ?? '-'}</td>
-        <td data-sort-value="${row.homeSpreadEdge ?? ''}">${row.homeSpreadEdge === null ? '-' : formatNumber(row.homeSpreadEdge, 1)}</td>
-        <td data-sort-value="${row.homeMoneyline ?? ''}">${formatMoneyline(row.homeMoneyline)}</td>
-        <td data-sort-value="${row.homeMoneylineEdge ?? ''}">${row.homeMoneylineEdge === null ? '-' : formatPercent(row.homeMoneylineEdge)}</td>
+        <td data-sort-value="${row.marketSpread ?? ''}">${marketSpreadDisplay}</td>
+        <td data-sort-value="${row.homeSpreadEdge ?? ''}">${spreadEdgeDisplay}</td>
+        <td data-sort-value="${row.homeMoneyline ?? ''}">${homeMlDisplay}</td>
+        <td data-sort-value="${row.homeMoneylineEdge ?? ''}">${mlEdgeDisplay}</td>
       </tr>
-    `).join('');
-  const explainer = '<p class="hint explanation">Home Win % maps Elo rating differences to probabilities; Model Spread divides the rating edge by 25 Elo-per-point; Fair ML is the model moneyline. Market columns appear when CSV odds are provided.</p>';
+    `;
+  }).join('');
+  const explainer = '<p class="hint explanation">Home Win % maps Elo rating differences to probabilities; Model Spread divides the rating edge by 25 Elo-per-point; Fair ML is the model moneyline. Market columns use uploaded CSVs when provided or the latest consensus from The Odds API.</p>';
   return `
     <section class="collapsible" data-section="predictions">
       <div class="collapsible-header" role="button" tabindex="0" aria-expanded="true">Upcoming Games</div>
@@ -848,24 +883,24 @@ const applyConsensusToPredictions = () => {
     const clone = { ...prediction };
     let mutated = false;
 
-    const homeMl = consensus.moneyline?.home?.odds;
-    if (homeMl !== null && homeMl !== undefined) {
-      const odds = Number(homeMl);
+    const homeMlNode = consensus.moneyline?.home;
+    if (homeMlNode && homeMlNode.odds !== null && homeMlNode.odds !== undefined) {
+      const odds = Number(homeMlNode.odds);
       if (Number.isFinite(odds)) {
         clone.homeMoneyline = odds;
-        const implied = oddsToProb(odds);
+        const implied = Number.isFinite(homeMlNode.prob) ? homeMlNode.prob : oddsToProb(odds);
         clone.homeMoneylineImplied = implied;
         clone.homeMoneylineEdge = implied === null ? null : clone.homeWinProb - implied;
         mutated = true;
       }
     }
 
-    const awayMl = consensus.moneyline?.away?.odds;
-    if (awayMl !== null && awayMl !== undefined) {
-      const odds = Number(awayMl);
+    const awayMlNode = consensus.moneyline?.away;
+    if (awayMlNode && awayMlNode.odds !== null && awayMlNode.odds !== undefined) {
+      const odds = Number(awayMlNode.odds);
       if (Number.isFinite(odds)) {
         clone.awayMoneyline = odds;
-        const implied = oddsToProb(odds);
+        const implied = Number.isFinite(awayMlNode.prob) ? awayMlNode.prob : oddsToProb(odds);
         clone.awayMoneylineImplied = implied;
         clone.awayMoneylineEdge = implied === null ? null : clone.awayWinProb - implied;
         mutated = true;
@@ -959,32 +994,152 @@ const renderEvCalculator = (focusInfo) => {
 
     const dateLabel = prediction.date ? new Date(prediction.date).toISOString().slice(0, 10) : '';
 
-    const spreadCell = (side, metrics, best, inputData) => `
-      <div class="ev-card">
-        <div class="ev-consensus">${best ? `${formatSpreadLine(best.line)} @ ${formatMoneyline(best.odds)}${best.book ? ` (${best.book})` : ''}` : 'Consensus spread unavailable.'}</div>
-        <div class="dual-input">
-          <input type="number" step="0.5" data-ev-input data-ev-type="spread" data-ev-side="${side}" data-ev-field="line" data-game="${key}" value="${inputData.line}" placeholder="${best ? best.line : ''}" />
-          <input type="number" step="1" data-ev-input data-ev-type="spread" data-ev-side="${side}" data-ev-field="odds" data-game="${key}" value="${inputData.odds}" placeholder="${best ? best.odds : ''}" />
-        </div>
-        <p class="ev-results">Model Edge: ${metrics.modelEdgePoints === null ? '-' : `${formatNumber(metrics.modelEdgePoints, 1)} pts`} · Model EV: ${formatEv(metrics.modelEv)} · Market EV: ${formatEv(metrics.consensusEv)}</p>
-      </div>`;
+    const describeConsensus = (label, odds, book) => {
+      if ((label === null || label === undefined || label === '') && (odds === null || odds === undefined)) return '-';
+      const pieces = [];
+      if (label !== null && label !== undefined && label !== '') pieces.push(label);
+      if (odds !== null && odds !== undefined && !Number.isNaN(Number(odds))) {
+        const num = Number(odds);
+        pieces.push(num > 0 ? `+${num}` : String(num));
+      }
+      const textParts = pieces.join(' · ');
+      return `${textParts}${book ? ` (${book})` : ''}`;
+    };
 
-    const moneylineCell = (side, metrics, best, inputValue) => `
-      <div class="ev-card">
-        <div class="ev-consensus">${best ? `${formatMoneyline(best.odds)}${best.book ? ` (${best.book})` : ''}` : 'Consensus moneyline unavailable.'}</div>
-        <input type="number" step="1" data-ev-input data-ev-type="moneyline" data-ev-side="${side}" data-ev-field="odds" data-game="${key}" value="${inputValue}" placeholder="${best ? best.odds : ''}" />
-        <p class="ev-results">Model EV: ${formatEv(metrics.modelEv)} · Market EV: ${formatEv(metrics.consensusEv)}</p>
-      </div>`;
+    const column = (title, cards) => `
+      <div class="ev-column">
+        <div class="ev-column-title">${title}</div>
+        ${cards.join('')}
+      </div>
+    `;
 
-    const totalCell = (side, metrics, best, inputData) => `
-      <div class="ev-card">
-        <div class="ev-consensus">${best ? `${side === 'over' ? 'O' : 'U'} ${formatNumber(best.line, 1)} @ ${formatMoneyline(best.odds)}${best.book ? ` (${best.book})` : ''}` : `Consensus ${side === 'over' ? 'over' : 'under'} total unavailable.`}</div>
-        <div class="dual-input">
-          <input type="number" step="0.5" data-ev-input data-ev-type="total" data-ev-side="${side}" data-ev-field="line" data-game="${key}" value="${inputData.line}" placeholder="${best ? best.line : ''}" />
-          <input type="number" step="1" data-ev-input data-ev-type="total" data-ev-side="${side}" data-ev-field="odds" data-game="${key}" value="${inputData.odds}" placeholder="${best ? best.odds : ''}" />
+    const spreadCard = (side, metrics, best, inputData) => {
+      const modelLine = side === 'home' ? prediction.modelSpread : -prediction.modelSpread;
+      const consensusLine = best?.line ?? null;
+      const consensusOdds = best?.odds ?? null;
+      const consensusBook = best?.book ?? null;
+      const marketDiff = consensusLine === null ? null : consensusLine - modelLine;
+      const modelEdgeProb = metrics.implied === null || metrics.modelProb === null ? null : metrics.modelProb - metrics.implied;
+      const marketEdgeProb = metrics.implied === null || metrics.consensusProb === null ? null : metrics.consensusProb - metrics.implied;
+      const placeholderLine = consensusLine === null || consensusLine === undefined ? '' : formatSpreadLine(consensusLine);
+      const placeholderOdds = consensusOdds === null || consensusOdds === undefined ? '' : (Number(consensusOdds) > 0 ? `+${Number(consensusOdds)}` : String(Number(consensusOdds)));
+      const lineValue = escapeHtml(inputData.line);
+      const oddsValue = escapeHtml(inputData.odds);
+      return `
+        <div class="ev-card">
+          <div class="ev-card-header">
+            <span class="ev-card-team">${side === 'home' ? prediction.homeTeam : prediction.awayTeam}</span>
+            <span class="ev-tag">Spread</span>
+          </div>
+          <p class="ev-consensus"><strong>Model Line:</strong> ${formatSpreadLine(modelLine)}</p>
+          <p class="ev-consensus"><strong>Consensus:</strong> ${describeConsensus(consensusLine === null ? '' : formatSpreadLine(consensusLine), consensusOdds, consensusBook)}</p>
+          ${marketDiff === null ? '' : `<p class="ev-consensus"><strong>Market − Model:</strong> ${formatSigned(marketDiff, 1)} pts</p>`}
+          <div class="ev-inputs">
+            <div class="ev-input-row">
+              <label>Line
+                <input type="text" inputmode="decimal" data-ev-input data-ev-type="spread" data-ev-side="${side}" data-ev-field="line" data-game="${key}" value="${lineValue}" placeholder="${escapeHtml(placeholderLine)}" />
+              </label>
+              <label>Odds
+                <input type="text" inputmode="numeric" data-ev-input data-ev-type="spread" data-ev-side="${side}" data-ev-field="odds" data-game="${key}" value="${oddsValue}" placeholder="${escapeHtml(placeholderOdds)}" />
+              </label>
+            </div>
+          </div>
+          <div class="ev-results">
+            <span><strong>Model Win %</strong><span>${formatPercent(metrics.modelProb)}</span></span>
+            <span><strong>Consensus Win %</strong><span>${formatPercent(metrics.consensusProb)}</span></span>
+            <span><strong>Model Edge</strong><span>${formatSignedPercent(modelEdgeProb)}</span></span>
+            <span><strong>Market Edge</strong><span>${formatSignedPercent(marketEdgeProb)}</span></span>
+            <span><strong>Model EV</strong><span>${formatEv(metrics.modelEv)}</span></span>
+            <span><strong>Market EV</strong><span>${formatEv(metrics.consensusEv)}</span></span>
+          </div>
         </div>
-        <p class="ev-results">Market EV: ${formatEv(metrics.consensusEv)}</p>
-      </div>`;
+      `;
+    };
+
+    const moneylineCard = (side, metrics, best, inputValue) => {
+      const team = side === 'home' ? prediction.homeTeam : prediction.awayTeam;
+      const modelProb = side === 'home' ? prediction.homeWinProb : prediction.awayWinProb;
+      const fairMl = side === 'home' ? prediction.homeFairMoneyline : prediction.awayFairMoneyline;
+      const consensusOdds = best?.odds ?? null;
+      const consensusBook = best?.book ?? null;
+      const consensusProb = metrics.consensusProb;
+      const modelEdgeProb = metrics.implied === null || metrics.modelProb === null ? null : metrics.modelProb - metrics.implied;
+      const marketEdgeProb = metrics.implied === null || consensusProb === null ? null : consensusProb - metrics.implied;
+      const placeholderOdds = consensusOdds === null || consensusOdds === undefined ? '' : (Number(consensusOdds) > 0 ? `+${Number(consensusOdds)}` : String(Number(consensusOdds)));
+      const oddsValue = escapeHtml(inputValue);
+      return `
+        <div class="ev-card">
+          <div class="ev-card-header">
+            <span class="ev-card-team">${team}</span>
+            <span class="ev-tag">Moneyline</span>
+          </div>
+          <p class="ev-consensus"><strong>Model Win %:</strong> ${formatPercent(modelProb)}</p>
+          <p class="ev-consensus"><strong>Model Fair ML:</strong> ${formatMoneyline(fairMl)}</p>
+          <p class="ev-consensus"><strong>Consensus:</strong> ${describeConsensus('', consensusOdds, consensusBook)}</p>
+          <p class="ev-consensus"><strong>Consensus Win %:</strong> ${formatPercent(consensusProb)}</p>
+          <div class="ev-inputs">
+            <label>Odds
+              <input type="text" inputmode="numeric" data-ev-input data-ev-type="moneyline" data-ev-side="${side}" data-ev-field="odds" data-game="${key}" value="${oddsValue}" placeholder="${escapeHtml(placeholderOdds)}" />
+            </label>
+          </div>
+          <div class="ev-results">
+            <span><strong>Model Edge</strong><span>${formatSignedPercent(modelEdgeProb)}</span></span>
+            <span><strong>Market Edge</strong><span>${formatSignedPercent(marketEdgeProb)}</span></span>
+            <span><strong>Model EV</strong><span>${formatEv(metrics.modelEv)}</span></span>
+            <span><strong>Market EV</strong><span>${formatEv(metrics.consensusEv)}</span></span>
+          </div>
+        </div>
+      `;
+    };
+
+    const totalCard = (side, metrics, best, inputData) => {
+      const label = side === 'over' ? 'Over' : 'Under';
+      const consensusLine = best?.line ?? null;
+      const consensusOdds = best?.odds ?? null;
+      const consensusBook = best?.book ?? null;
+      const placeholderLine = consensusLine === null || consensusLine === undefined ? '' : Number(consensusLine).toFixed(1);
+      const placeholderOdds = consensusOdds === null || consensusOdds === undefined ? '' : (Number(consensusOdds) > 0 ? `+${Number(consensusOdds)}` : String(Number(consensusOdds)));
+      const lineValue = escapeHtml(inputData.line);
+      const oddsValue = escapeHtml(inputData.odds);
+      const marketEdgeProb = metrics.implied === null || metrics.consensusProb === null ? null : metrics.consensusProb - metrics.implied;
+      return `
+        <div class="ev-card">
+          <div class="ev-card-header">
+            <span class="ev-card-team">${label}</span>
+            <span class="ev-tag">Total</span>
+          </div>
+          <p class="ev-consensus"><strong>Consensus:</strong> ${describeConsensus(consensusLine === null ? '' : formatNumber(consensusLine, 1), consensusOdds, consensusBook)}</p>
+          <div class="ev-inputs">
+            <div class="ev-input-row">
+              <label>Line
+                <input type="text" inputmode="decimal" data-ev-input data-ev-type="total" data-ev-side="${side}" data-ev-field="line" data-game="${key}" value="${lineValue}" placeholder="${escapeHtml(placeholderLine)}" />
+              </label>
+              <label>Odds
+                <input type="text" inputmode="numeric" data-ev-input data-ev-type="total" data-ev-side="${side}" data-ev-field="odds" data-game="${key}" value="${oddsValue}" placeholder="${escapeHtml(placeholderOdds)}" />
+              </label>
+            </div>
+          </div>
+          <div class="ev-results">
+            <span><strong>Consensus Win %</strong><span>${formatPercent(metrics.consensusProb)}</span></span>
+            <span><strong>Market Edge</strong><span>${formatSignedPercent(marketEdgeProb)}</span></span>
+            <span><strong>Market EV</strong><span>${formatEv(metrics.consensusEv)}</span></span>
+          </div>
+        </div>
+      `;
+    };
+
+    const spreadColumn = column('Spread', [
+      spreadCard('home', spreadHome, bestSpread.home, inputs.spread.home),
+      spreadCard('away', spreadAway, bestSpread.away, inputs.spread.away),
+    ]);
+    const moneylineColumn = column('Moneyline', [
+      moneylineCard('home', mlHome, bestMoneyline.home, inputs.moneyline.home),
+      moneylineCard('away', mlAway, bestMoneyline.away, inputs.moneyline.away),
+    ]);
+    const totalColumn = column('Totals', [
+      totalCard('over', totalOver, bestTotal.over, inputs.total.over),
+      totalCard('under', totalUnder, bestTotal.under, inputs.total.under),
+    ]);
 
     return `
       <article class="ev-game">
@@ -993,18 +1148,9 @@ const renderEvCalculator = (focusInfo) => {
         </header>
         <div class="ev-board">
           <div class="ev-board-grid">
-            <div class="ev-head"></div>
-            <div class="ev-head">Spread</div>
-            <div class="ev-head">Moneyline</div>
-            <div class="ev-head">Totals</div>
-            <div class="ev-team">${prediction.homeTeam}</div>
-            ${spreadCell('home', spreadHome, bestSpread.home, inputs.spread.home)}
-            ${moneylineCell('home', mlHome, bestMoneyline.home, inputs.moneyline.home)}
-            ${totalCell('over', totalOver, bestTotal.over, inputs.total.over)}
-            <div class="ev-team">${prediction.awayTeam}</div>
-            ${spreadCell('away', spreadAway, bestSpread.away, inputs.spread.away)}
-            ${moneylineCell('away', mlAway, bestMoneyline.away, inputs.moneyline.away)}
-            ${totalCell('under', totalUnder, bestTotal.under, inputs.total.under)}
+            ${spreadColumn}
+            ${moneylineColumn}
+            ${totalColumn}
           </div>
         </div>
       </article>
@@ -1095,10 +1241,10 @@ const renderCustomSection = () => {
         <td>${label}</td>
         <td>${formatMoneyline(bet.odds)}</td>
         <td>${formatPercent(modelProb)}</td>
-        <td>${formatPercent(modelEdge)}</td>
+        <td>${formatSignedPercent(modelEdge)}</td>
         <td>${formatEv(modelEv)}</td>
         <td>${formatPercent(consensusProb)}</td>
-        <td>${formatPercent(consensusEdge)}</td>
+        <td>${formatSignedPercent(consensusEdge)}</td>
         <td>${formatEv(consensusEvVal)}</td>
         <td>${formatMoneyline(bestOdds)}${bestBook ? ` (${bestBook})` : ''}</td>
         <td><button type="button" data-remove-bet="${index}">Remove</button></td>
@@ -1136,6 +1282,7 @@ const renderCustomSection = () => {
     });
   });
 };
+
 
 const renderEloSection = () => {
   const container = document.getElementById('eloOutputs');
@@ -1319,6 +1466,7 @@ const runModel = () => {
     state.ratings = ratings;
     state.predictions = predictions;
     state.predictionMap = buildPredictionMap(predictions);
+    applyConsensusToPredictions();
 
     const filteredInputs = {};
     state.predictionMap.forEach((_, key) => {
@@ -1442,7 +1590,9 @@ const fetchOddsFromApi = async () => {
     const data = await response.json();
     state.sportsbookData = Array.isArray(data) ? data : [];
     state.consensusMap = buildConsensusMap(state.sportsbookData);
+    applyConsensusToPredictions();
     state.apiStatus = `Loaded odds for ${state.sportsbookData.length} games.`;
+    renderEloSection();
     renderEvCalculator();
     renderCustomSection();
   } catch (err) {
