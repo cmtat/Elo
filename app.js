@@ -712,11 +712,27 @@ const renderRatingsTable = (ratings, meta) => {
   `;
 };
 
+const hasMarketValues = (value) => value !== null && value !== undefined && !Number.isNaN(value);
+
 const renderPredictionsTable = (predictions) => {
   if (!predictions || !predictions.length) {
     return '<p class="hint">Load upcoming games (CSV or auto-fetch) before running the model.</p>';
   }
-  const rows = predictions.map((row) => {
+  const marketDataPresent = predictions.some((row) => hasMarketValues(row.marketSpread) || hasMarketValues(row.homeMoneyline));
+  const usablePredictions = marketDataPresent
+    ? predictions.filter((row) => [
+      row.marketSpread,
+      row.homeSpreadEdge,
+      row.homeMoneyline,
+      row.homeMoneylineEdge,
+    ].every(hasMarketValues))
+    : predictions;
+
+  if (!usablePredictions.length) {
+    return '<p class="hint">No games with complete market data are available yet.</p>';
+  }
+
+  const rows = usablePredictions.map((row) => {
     const marketSpreadDisplay = formatSpreadLine(row.marketSpread);
     const spreadEdgeDisplay = row.homeSpreadEdge === null || row.homeSpreadEdge === undefined
       ? '-'
@@ -967,6 +983,20 @@ const renderEvCalculator = (focusInfo) => {
     return;
   }
 
+  const metricRow = (label, value) => `
+    <div class="ev-metric">
+      <span class="ev-metric-label">${label}</span>
+      <span class="ev-metric-value">${value}</span>
+    </div>
+  `;
+
+  const detailRow = (label, value) => `
+    <div class="ev-detail">
+      <span class="ev-detail-label">${label}</span>
+      <span class="ev-detail-value">${value}</span>
+    </div>
+  `;
+
   const sections = state.predictions.map((prediction) => {
     const key = buildPredictionKey(prediction.homeTeam, prediction.awayTeam);
     const consensus = state.consensusMap.get(key) || null;
@@ -1031,9 +1061,11 @@ const renderEvCalculator = (focusInfo) => {
             <span class="ev-card-team">${side === 'home' ? prediction.homeTeam : prediction.awayTeam}</span>
             <span class="ev-tag">Spread</span>
           </div>
-          <p class="ev-consensus"><strong>Model Line:</strong> ${formatSpreadLine(modelLine)}</p>
-          <p class="ev-consensus"><strong>Consensus:</strong> ${describeConsensus(consensusLine === null ? '' : formatSpreadLine(consensusLine), consensusOdds, consensusBook)}</p>
-          ${marketDiff === null ? '' : `<p class="ev-consensus"><strong>Market − Model:</strong> ${formatSigned(marketDiff, 1)} pts</p>`}
+          <div class="ev-card-details">
+            ${detailRow('Model Line', formatSpreadLine(modelLine))}
+            ${detailRow('Consensus', describeConsensus(consensusLine === null ? '' : formatSpreadLine(consensusLine), consensusOdds, consensusBook))}
+            ${marketDiff === null ? '' : detailRow('Market − Model', `${formatSigned(marketDiff, 1)} pts`)}
+          </div>
           <div class="ev-inputs">
             <div class="ev-input-row">
               <label>Line
@@ -1045,12 +1077,12 @@ const renderEvCalculator = (focusInfo) => {
             </div>
           </div>
           <div class="ev-results">
-            <span><strong>Model Win %</strong><span>${formatPercent(metrics.modelProb)}</span></span>
-            <span><strong>Consensus Win %</strong><span>${formatPercent(metrics.consensusProb)}</span></span>
-            <span><strong>Model Edge</strong><span>${formatSignedPercent(modelEdgeProb)}</span></span>
-            <span><strong>Market Edge</strong><span>${formatSignedPercent(marketEdgeProb)}</span></span>
-            <span><strong>Model EV</strong><span>${formatEv(metrics.modelEv)}</span></span>
-            <span><strong>Market EV</strong><span>${formatEv(metrics.consensusEv)}</span></span>
+            ${metricRow('Model Win %', formatPercent(metrics.modelProb))}
+            ${metricRow('Consensus Win %', formatPercent(metrics.consensusProb))}
+            ${metricRow('Model Edge', formatSignedPercent(modelEdgeProb))}
+            ${metricRow('Market Edge', formatSignedPercent(marketEdgeProb))}
+            ${metricRow('Model EV', formatEv(metrics.modelEv))}
+            ${metricRow('Market EV', formatEv(metrics.consensusEv))}
           </div>
         </div>
       `;
@@ -1073,20 +1105,22 @@ const renderEvCalculator = (focusInfo) => {
             <span class="ev-card-team">${team}</span>
             <span class="ev-tag">Moneyline</span>
           </div>
-          <p class="ev-consensus"><strong>Model Win %:</strong> ${formatPercent(modelProb)}</p>
-          <p class="ev-consensus"><strong>Model Fair ML:</strong> ${formatMoneyline(fairMl)}</p>
-          <p class="ev-consensus"><strong>Consensus:</strong> ${describeConsensus('', consensusOdds, consensusBook)}</p>
-          <p class="ev-consensus"><strong>Consensus Win %:</strong> ${formatPercent(consensusProb)}</p>
+          <div class="ev-card-details">
+            ${detailRow('Model Win %', formatPercent(modelProb))}
+            ${detailRow('Model Fair ML', formatMoneyline(fairMl))}
+            ${detailRow('Consensus', describeConsensus('', consensusOdds, consensusBook))}
+            ${detailRow('Consensus Win %', formatPercent(consensusProb))}
+          </div>
           <div class="ev-inputs">
             <label>Odds
               <input type="text" inputmode="numeric" data-ev-input data-ev-type="moneyline" data-ev-side="${side}" data-ev-field="odds" data-game="${key}" value="${oddsValue}" placeholder="${escapeHtml(placeholderOdds)}" />
             </label>
           </div>
           <div class="ev-results">
-            <span><strong>Model Edge</strong><span>${formatSignedPercent(modelEdgeProb)}</span></span>
-            <span><strong>Market Edge</strong><span>${formatSignedPercent(marketEdgeProb)}</span></span>
-            <span><strong>Model EV</strong><span>${formatEv(metrics.modelEv)}</span></span>
-            <span><strong>Market EV</strong><span>${formatEv(metrics.consensusEv)}</span></span>
+            ${metricRow('Model Edge', formatSignedPercent(modelEdgeProb))}
+            ${metricRow('Market Edge', formatSignedPercent(marketEdgeProb))}
+            ${metricRow('Model EV', formatEv(metrics.modelEv))}
+            ${metricRow('Market EV', formatEv(metrics.consensusEv))}
           </div>
         </div>
       `;
@@ -1108,7 +1142,9 @@ const renderEvCalculator = (focusInfo) => {
             <span class="ev-card-team">${label}</span>
             <span class="ev-tag">Total</span>
           </div>
-          <p class="ev-consensus"><strong>Consensus:</strong> ${describeConsensus(consensusLine === null ? '' : formatNumber(consensusLine, 1), consensusOdds, consensusBook)}</p>
+          <div class="ev-card-details">
+            ${detailRow('Consensus', describeConsensus(consensusLine === null ? '' : formatNumber(consensusLine, 1), consensusOdds, consensusBook))}
+          </div>
           <div class="ev-inputs">
             <div class="ev-input-row">
               <label>Line
@@ -1120,9 +1156,9 @@ const renderEvCalculator = (focusInfo) => {
             </div>
           </div>
           <div class="ev-results">
-            <span><strong>Consensus Win %</strong><span>${formatPercent(metrics.consensusProb)}</span></span>
-            <span><strong>Market Edge</strong><span>${formatSignedPercent(marketEdgeProb)}</span></span>
-            <span><strong>Market EV</strong><span>${formatEv(metrics.consensusEv)}</span></span>
+            ${metricRow('Consensus Win %', formatPercent(metrics.consensusProb))}
+            ${metricRow('Market Edge', formatSignedPercent(marketEdgeProb))}
+            ${metricRow('Market EV', formatEv(metrics.consensusEv))}
           </div>
         </div>
       `;
@@ -1143,8 +1179,17 @@ const renderEvCalculator = (focusInfo) => {
 
     return `
       <article class="ev-game">
-        <header>
-          <h3>${prediction.awayTeam} @ ${prediction.homeTeam}${dateLabel ? ` · ${dateLabel}` : ''}</h3>
+        <header class="ev-game-header">
+          <div class="ev-matchup">
+            <span class="ev-team ev-away">${prediction.awayTeam}</span>
+            <span class="ev-vs">@</span>
+            <span class="ev-team ev-home">${prediction.homeTeam}</span>
+          </div>
+          <div class="ev-game-meta">
+            ${dateLabel ? `<span class="ev-meta-item ev-date">${dateLabel}</span>` : ''}
+            <span class="ev-meta-item">Home Win: <strong>${formatPercent(prediction.homeWinProb)}</strong></span>
+            <span class="ev-meta-item">Model Spread: <strong>${formatNumber(prediction.modelSpread, 1)}</strong></span>
+          </div>
         </header>
         <div class="ev-board">
           <div class="ev-board-grid">
