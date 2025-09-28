@@ -356,6 +356,37 @@ footer {
   color: var(--text);
 }
 
+.ev-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.ev-select-label {
+  font-size: 0.9rem;
+  color: var(--subtle);
+}
+
+.ev-controls select {
+  min-width: 220px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.4);
+  background: rgba(15, 23, 42, 0.7);
+  color: var(--text);
+}
+
+.hint.ev-warning {
+  background: rgba(34, 211, 238, 0.12);
+  border: 1px solid rgba(34, 211, 238, 0.25);
+  padding: 10px 12px;
+  border-radius: 10px;
+  color: var(--subtle);
+  margin-bottom: 16px;
+}
+
 .ev-game {
   border: 1px solid rgba(148, 163, 184, 0.18);
   border-radius: 16px;
@@ -427,15 +458,11 @@ footer {
 
 .ev-board {
   margin-top: 18px;
-}
-
-.ev-board-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
   gap: 18px;
 }
 
-.ev-column {
+.ev-group {
   background: rgba(15, 23, 42, 0.8);
   border: 1px solid rgba(148, 163, 184, 0.16);
   border-radius: 14px;
@@ -445,12 +472,18 @@ footer {
   gap: 14px;
 }
 
-.ev-column-title {
+.ev-group-title {
   font-weight: 600;
   color: var(--subtle);
   text-transform: uppercase;
   letter-spacing: 0.06em;
   font-size: 0.8rem;
+}
+
+.ev-group-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
 }
 
 .ev-card {
@@ -550,7 +583,7 @@ footer {
   font-size: 0.85rem;
   color: var(--subtle);
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 8px;
 }
 
