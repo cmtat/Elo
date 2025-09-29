@@ -31,6 +31,7 @@ const state = {
   consensusMap: new Map(),
   evInputs: {},
   evSelectedGame: null,
+  evWeekFilter: null,
   customBets: [],
   apiKey: '',
   apiLoading: false,
@@ -981,30 +982,69 @@ const renderEvCalculator = (focusInfo) => {
     return;
   }
 
+  const weekValues = Array.from(new Set(predictions
+    .map((prediction) => prediction.week)
+    .filter((week) => week !== null && week !== undefined))).sort((a, b) => a - b);
+
+  if (state.evWeekFilter !== null && !weekValues.includes(state.evWeekFilter)) {
+    state.evWeekFilter = null;
+  }
+
+  const filteredPredictions = state.evWeekFilter === null
+    ? predictions
+    : predictions.filter((prediction) => prediction.week === state.evWeekFilter);
+
+  const activePredictions = filteredPredictions.length ? filteredPredictions : predictions;
+  if (filteredPredictions.length === 0 && state.evWeekFilter !== null) {
+    state.evWeekFilter = null;
+  }
+
   if (state.evSelectedGame && !state.predictionMap.has(state.evSelectedGame)) {
     state.evSelectedGame = null;
   }
 
+  const activeKeys = new Set(activePredictions.map((prediction) => buildPredictionKey(prediction.homeTeam, prediction.awayTeam)));
+
+  if (state.evSelectedGame && !activeKeys.has(state.evSelectedGame)) {
+    state.evSelectedGame = null;
+  }
+
   if (!state.evSelectedGame) {
-    const first = predictions[0];
+    const first = activePredictions[0];
     if (first) {
       state.evSelectedGame = buildPredictionKey(first.homeTeam, first.awayTeam);
     }
   }
 
-  const gameOptions = predictions.map((prediction) => {
+  const selectedWeek = state.evWeekFilter !== null ? String(state.evWeekFilter) : '';
+  const weekOptions = [
+    `<option value=""${selectedWeek === '' ? ' selected' : ''}>All Weeks</option>`,
+    ...weekValues.map((week) => {
+      const value = String(week);
+      const selectedAttr = selectedWeek === value ? ' selected' : '';
+      return `<option value="${value}"${selectedAttr}>Week ${escapeHtml(String(week))}</option>`;
+    }),
+  ].join('');
+
+  const gameOptions = activePredictions.map((prediction) => {
     const key = buildPredictionKey(prediction.homeTeam, prediction.awayTeam);
     const label = `${prediction.awayTeam} @ ${prediction.homeTeam}`;
     const selectedAttr = key === state.evSelectedGame ? ' selected' : '';
     return `<option value="${key}"${selectedAttr}>${escapeHtml(label)}</option>`;
   }).join('');
 
+  const controlsHtml = `
+    <div class="ev-controls">
+      <label for="evWeekSelect" class="ev-select-label">Week</label>
+      <select id="evWeekSelect">${weekOptions}</select>
+      <label for="evGameSelect" class="ev-select-label">Matchup</label>
+      <select id="evGameSelect">${gameOptions}</select>
+    </div>
+  `;
+
   if (!state.evSelectedGame) {
     container.innerHTML = `
-      <div class="ev-controls">
-        <label for="evGameSelect" class="ev-select-label">Matchup</label>
-        <select id="evGameSelect">${gameOptions}</select>
-      </div>
+      ${controlsHtml}
       <p class="hint">Select a matchup to view expected value inputs.</p>
     `;
     attachEvInputs();
@@ -1015,10 +1055,7 @@ const renderEvCalculator = (focusInfo) => {
   const prediction = state.predictionMap.get(selectedKey);
   if (!prediction) {
     container.innerHTML = `
-      <div class="ev-controls">
-        <label for="evGameSelect" class="ev-select-label">Matchup</label>
-        <select id="evGameSelect">${gameOptions}</select>
-      </div>
+      ${controlsHtml}
       <p class="hint">Select a matchup to view expected value inputs.</p>
     `;
     attachEvInputs();
@@ -1240,10 +1277,7 @@ const renderEvCalculator = (focusInfo) => {
   const oddsHint = state.sportsbookData.length ? '' : '<p class="hint ev-warning">Load sportsbook odds to prefill consensus numbers (optional).</p>';
 
   container.innerHTML = `
-    <div class="ev-controls">
-      <label for="evGameSelect" class="ev-select-label">Matchup</label>
-      <select id="evGameSelect">${gameOptions}</select>
-    </div>
+    ${controlsHtml}
     ${oddsHint}
     ${content}
   `;
@@ -1383,6 +1417,20 @@ const renderEloSection = () => {
 };
 
 const attachEvInputs = (focusInfo) => {
+  const weekSelect = document.getElementById('evWeekSelect');
+  if (weekSelect) {
+    weekSelect.addEventListener('change', (event) => {
+      const raw = event.target.value;
+      if (raw === '') {
+        state.evWeekFilter = null;
+      } else {
+        const parsed = Number(raw);
+        state.evWeekFilter = Number.isFinite(parsed) ? parsed : null;
+      }
+      renderEvCalculator();
+    });
+  }
+
   const gameSelect = document.getElementById('evGameSelect');
   if (gameSelect) {
     gameSelect.addEventListener('change', (event) => {
