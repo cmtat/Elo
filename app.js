@@ -32,6 +32,8 @@ const state = {
   evInputs: {},
   evSelectedGame: null,
   evWeekFilter: null,
+  eloWeekFilter: null,
+  eloGameFilter: null,
   customBets: [],
   apiKey: '',
   apiLoading: false,
@@ -461,11 +463,36 @@ const buildPredictionMap = (predictions) => {
   return map;
 };
 
-const betterOdds = (newOdds, currentOdds) => {
-  if (currentOdds === null || currentOdds === undefined) return true;
-  const newDecimal = americanToDecimal(newOdds);
-  const currentDecimal = americanToDecimal(currentOdds);
-  return newDecimal !== null && currentDecimal !== null && newDecimal > currentDecimal;
+const buildWeekKey = (season, week) => `${season}|${week}`;
+
+const parseWeekKey = (key) => {
+  if (!key || typeof key !== 'string') return null;
+  const [seasonStr, weekStr] = key.split('|');
+  const season = Number(seasonStr);
+  const week = Number(weekStr);
+  if (!Number.isFinite(season) || !Number.isFinite(week)) return null;
+  return { season, week };
+};
+
+const compareWeeksDesc = (a, b) => {
+  if (a.season !== b.season) return b.season - a.season;
+  return b.week - a.week;
+};
+
+const findLatestWeekKey = (predictions) => {
+  let latest = null;
+  predictions.forEach((prediction) => {
+    if (!Number.isFinite(prediction.season) || !Number.isFinite(prediction.week)) return;
+    if (!latest || prediction.season > latest.season || (prediction.season === latest.season && prediction.week > latest.week)) {
+      latest = { season: prediction.season, week: prediction.week };
+    }
+  });
+  return latest ? buildWeekKey(latest.season, latest.week) : null;
+};
+
+const formatWeekLabel = (season, week, includeSeason = true) => {
+  if (!Number.isFinite(season) || !Number.isFinite(week)) return 'Unknown Week';
+  return includeSeason ? `Season ${season} · Week ${week}` : `Week ${week}`;
 };
 
 const normalizePoint = (point) => {
@@ -474,27 +501,42 @@ const normalizePoint = (point) => {
   return num.toFixed(1);
 };
 
-const updateConsensusPair = (entry, side, outcome, bookTitle) => {
+const createConsensusBucket = () => ({ values: [], consensus: null });
+
+const addOddsSample = (bucket, outcome, bookTitle) => {
   const odds = toNumber(outcome.price);
   if (odds === null) return;
-  if (!entry[side] || betterOdds(odds, entry[side].odds)) {
-    entry[side] = {
-      odds,
-      book: bookTitle,
-      prob: null,
-    };
-  }
+  bucket.values.push({ odds, book: bookTitle || null });
+};
+
+const computeAverageOdds = (bucket) => {
+  if (!bucket.values.length) return null;
+  const total = bucket.values.reduce((sum, item) => sum + item.odds, 0);
+  return {
+    odds: total / bucket.values.length,
+    sampleSize: bucket.values.length,
+  };
 };
 
 const finalizePairProbabilities = (entry) => {
-  if (!entry.home || !entry.away) return;
-  const impliedHome = oddsToProb(entry.home.odds);
-  const impliedAway = oddsToProb(entry.away.odds);
+  const homeSummary = computeAverageOdds(entry.home);
+  const awaySummary = computeAverageOdds(entry.away);
+  if (!homeSummary || !awaySummary) return;
+  const impliedHome = oddsToProb(homeSummary.odds);
+  const impliedAway = oddsToProb(awaySummary.odds);
   if (impliedHome === null || impliedAway === null) return;
   const total = impliedHome + impliedAway;
   if (total <= 0) return;
-  entry.home.prob = impliedHome / total;
-  entry.away.prob = impliedAway / total;
+  entry.home.consensus = {
+    odds: homeSummary.odds,
+    prob: impliedHome / total,
+    sampleSize: homeSummary.sampleSize,
+  };
+  entry.away.consensus = {
+    odds: awaySummary.odds,
+    prob: impliedAway / total,
+    sampleSize: awaySummary.sampleSize,
+  };
 };
 
 const buildConsensusMap = (oddsData) => {
@@ -510,7 +552,10 @@ const buildConsensusMap = (oddsData) => {
     const consensus = {
       homeTeam: event.home_team,
       awayTeam: event.away_team,
-      moneyline: { home: { odds: null, book: null, prob: null }, away: { odds: null, book: null, prob: null } },
+      moneyline: {
+        home: createConsensusBucket(),
+        away: createConsensusBucket(),
+      },
       spreads: new Map(),
       totals: new Map(),
     };
@@ -523,14 +568,10 @@ const buildConsensusMap = (oddsData) => {
       if (h2h) {
         h2h.outcomes.forEach((outcome) => {
           const teamCode = canonicalTeamCode(outcome.name);
-          const odds = toNumber(outcome.price);
-          if (teamCode === homeCode && odds !== null && betterOdds(odds, consensus.moneyline.home.odds)) {
-            consensus.moneyline.home.odds = odds;
-            consensus.moneyline.home.book = title;
-          }
-          if (teamCode === awayCode && odds !== null && betterOdds(odds, consensus.moneyline.away.odds)) {
-            consensus.moneyline.away.odds = odds;
-            consensus.moneyline.away.book = title;
+          if (teamCode === homeCode) {
+            addOddsSample(consensus.moneyline.home, outcome, title);
+          } else if (teamCode === awayCode) {
+            addOddsSample(consensus.moneyline.away, outcome, title);
           }
         });
       }
@@ -542,9 +583,14 @@ const buildConsensusMap = (oddsData) => {
         if (homeOutcome && awayOutcome) {
           const pointKey = normalizePoint(homeOutcome.point);
           if (pointKey !== null) {
-            const entry = consensus.spreads.get(pointKey) || { pointHome: Number(homeOutcome.point), pointAway: Number(awayOutcome.point), home: null, away: null };
-            updateConsensusPair(entry, 'home', homeOutcome, title);
-            updateConsensusPair(entry, 'away', awayOutcome, title);
+            const entry = consensus.spreads.get(pointKey) || {
+              pointHome: Number(homeOutcome.point),
+              pointAway: Number(awayOutcome.point),
+              home: createConsensusBucket(),
+              away: createConsensusBucket(),
+            };
+            addOddsSample(entry.home, homeOutcome, title);
+            addOddsSample(entry.away, awayOutcome, title);
             consensus.spreads.set(pointKey, entry);
           }
         }
@@ -557,45 +603,123 @@ const buildConsensusMap = (oddsData) => {
         if (overOutcome && underOutcome) {
           const pointKey = normalizePoint(overOutcome.point);
           if (pointKey !== null) {
-            const entry = consensus.totals.get(pointKey) || { point: Number(overOutcome.point), over: null, under: null };
-            if (toNumber(overOutcome.price) !== null && ( !entry.over || betterOdds(toNumber(overOutcome.price), entry.over.odds) )) {
-              entry.over = { odds: toNumber(overOutcome.price), book: title, prob: null };
-            }
-            if (toNumber(underOutcome.price) !== null && ( !entry.under || betterOdds(toNumber(underOutcome.price), entry.under.odds) )) {
-              entry.under = { odds: toNumber(underOutcome.price), book: title, prob: null };
-            }
+            const entry = consensus.totals.get(pointKey) || {
+              point: Number(overOutcome.point),
+              over: createConsensusBucket(),
+              under: createConsensusBucket(),
+            };
+            addOddsSample(entry.over, overOutcome, title);
+            addOddsSample(entry.under, underOutcome, title);
             consensus.totals.set(pointKey, entry);
           }
         }
       }
     });
 
-    if (consensus.moneyline.home.odds !== null && consensus.moneyline.away.odds !== null) {
-      const impliedHome = oddsToProb(consensus.moneyline.home.odds);
-      const impliedAway = oddsToProb(consensus.moneyline.away.odds);
-      if (impliedHome !== null && impliedAway !== null && impliedHome + impliedAway > 0) {
-        const total = impliedHome + impliedAway;
-        consensus.moneyline.home.prob = impliedHome / total;
-        consensus.moneyline.away.prob = impliedAway / total;
+    if (consensus.moneyline.home.values.length && consensus.moneyline.away.values.length) {
+      const homeSummary = computeAverageOdds(consensus.moneyline.home);
+      const awaySummary = computeAverageOdds(consensus.moneyline.away);
+      if (homeSummary && awaySummary) {
+        const impliedHome = oddsToProb(homeSummary.odds);
+        const impliedAway = oddsToProb(awaySummary.odds);
+        if (impliedHome !== null && impliedAway !== null && impliedHome + impliedAway > 0) {
+          const total = impliedHome + impliedAway;
+          consensus.moneyline.home.consensus = {
+            odds: homeSummary.odds,
+            prob: impliedHome / total,
+            sampleSize: homeSummary.sampleSize,
+          };
+          consensus.moneyline.away.consensus = {
+            odds: awaySummary.odds,
+            prob: impliedAway / total,
+            sampleSize: awaySummary.sampleSize,
+          };
+        }
       }
     }
 
     consensus.spreads.forEach((entry) => finalizePairProbabilities(entry));
     consensus.totals.forEach((entry) => {
-      if (entry.over && entry.under) {
-        const impliedOver = oddsToProb(entry.over.odds);
-        const impliedUnder = oddsToProb(entry.under.odds);
-        if (impliedOver !== null && impliedUnder !== null && impliedOver + impliedUnder > 0) {
-          const total = impliedOver + impliedUnder;
-          entry.over.prob = impliedOver / total;
-          entry.under.prob = impliedUnder / total;
-        }
+      const overSummary = computeAverageOdds(entry.over);
+      const underSummary = computeAverageOdds(entry.under);
+      if (!overSummary || !underSummary) return;
+      const impliedOver = oddsToProb(overSummary.odds);
+      const impliedUnder = oddsToProb(underSummary.odds);
+      if (impliedOver !== null && impliedUnder !== null && impliedOver + impliedUnder > 0) {
+        const total = impliedOver + impliedUnder;
+        entry.over.consensus = {
+          odds: overSummary.odds,
+          prob: impliedOver / total,
+          sampleSize: overSummary.sampleSize,
+        };
+        entry.under.consensus = {
+          odds: underSummary.odds,
+          prob: impliedUnder / total,
+          sampleSize: underSummary.sampleSize,
+        };
       }
     });
 
     map.set(key, consensus);
   });
   return map;
+};
+
+const sampleSizeLabel = (count) => {
+  if (!count || count <= 0) return null;
+  return count === 1 ? 'Avg of 1 book' : `Avg of ${count} books`;
+};
+
+const getConsensusMoneyline = (consensus, side) => {
+  if (!consensus || !consensus.moneyline) return null;
+  const bucket = consensus.moneyline[side];
+  if (!bucket || !bucket.consensus) return null;
+  return {
+    odds: bucket.consensus.odds,
+    prob: bucket.consensus.prob,
+    sampleSize: bucket.consensus.sampleSize,
+    label: sampleSizeLabel(bucket.consensus.sampleSize),
+  };
+};
+
+const getConsensusSpread = (consensus, side) => {
+  if (!consensus || !consensus.spreads) return null;
+  let chosen = null;
+  consensus.spreads.forEach((entry) => {
+    const bucket = side === 'home' ? entry.home : entry.away;
+    if (!bucket || !bucket.consensus) return;
+    const sampleSize = bucket.consensus.sampleSize;
+    if (!chosen || sampleSize > chosen.sampleSize) {
+      chosen = {
+        line: side === 'home' ? entry.pointHome : entry.pointAway,
+        odds: bucket.consensus.odds,
+        prob: bucket.consensus.prob,
+        sampleSize,
+        label: sampleSizeLabel(sampleSize),
+      };
+    }
+  });
+  return chosen;
+};
+
+const getConsensusTotal = (consensus, side) => {
+  if (!consensus || !consensus.totals) return null;
+  let chosen = null;
+  consensus.totals.forEach((entry) => {
+    const bucket = side === 'over' ? entry.over : entry.under;
+    if (!bucket || !bucket.consensus) return;
+    const sampleSize = bucket.consensus.sampleSize;
+    if (!chosen || sampleSize > chosen.sampleSize) {
+      chosen = {
+        line: entry.point,
+        odds: bucket.consensus.odds,
+        prob: bucket.consensus.prob,
+        sampleSize,
+        label: sampleSizeLabel(sampleSize),
+      };
+    }
+  });
+  return chosen;
 };
 
 const getDefaultEvInput = () => ({
@@ -720,18 +844,91 @@ const renderPredictionsTable = (predictions) => {
   if (!predictions || !predictions.length) {
     return '<p class="hint">Load upcoming games (CSV or auto-fetch) before running the model.</p>';
   }
-  const marketDataPresent = predictions.some((row) => hasMarketValues(row.marketSpread) || hasMarketValues(row.homeMoneyline));
+
+  const weekMap = new Map();
+  predictions.forEach((prediction) => {
+    if (!Number.isFinite(prediction.season) || !Number.isFinite(prediction.week)) return;
+    const key = buildWeekKey(prediction.season, prediction.week);
+    if (!weekMap.has(key)) {
+      weekMap.set(key, { season: prediction.season, week: prediction.week });
+    }
+  });
+
+  const weekOptionsData = Array.from(weekMap.entries()).map(([key, value]) => ({ key, ...value })).sort(compareWeeksDesc);
+
+  let selectedWeekKey = state.eloWeekFilter;
+  if (selectedWeekKey !== null && selectedWeekKey !== undefined && selectedWeekKey !== '' && !weekMap.has(selectedWeekKey)) {
+    selectedWeekKey = weekOptionsData.length ? weekOptionsData[0].key : null;
+    state.eloWeekFilter = selectedWeekKey;
+  }
+  const baseWeekFiltered = selectedWeekKey ? predictions.filter((prediction) => buildWeekKey(prediction.season, prediction.week) === selectedWeekKey) : predictions;
+
+  const gameMap = new Map();
+  baseWeekFiltered.forEach((prediction) => {
+    const key = buildPredictionKey(prediction.homeTeam, prediction.awayTeam);
+    if (!gameMap.has(key)) {
+      const weekLabel = formatWeekLabel(prediction.season, prediction.week, weekOptionsData.length > 1);
+      gameMap.set(key, `${prediction.awayTeam} @ ${prediction.homeTeam} (${weekLabel})`);
+    }
+  });
+
+  let selectedGameKey = state.eloGameFilter;
+  if (selectedGameKey && !gameMap.has(selectedGameKey)) {
+    selectedGameKey = null;
+    state.eloGameFilter = null;
+  }
+
+  const baseFiltered = selectedGameKey ? baseWeekFiltered.filter((prediction) => buildPredictionKey(prediction.homeTeam, prediction.awayTeam) === selectedGameKey) : baseWeekFiltered;
+
+  const marketDataPresent = baseFiltered.some((row) => hasMarketValues(row.marketSpread) || hasMarketValues(row.homeMoneyline));
   const usablePredictions = marketDataPresent
-    ? predictions.filter((row) => [
+    ? baseFiltered.filter((row) => [
       row.marketSpread,
       row.homeSpreadEdge,
       row.homeMoneyline,
       row.homeMoneylineEdge,
     ].every(hasMarketValues))
-    : predictions;
+    : baseFiltered;
+
+  const includeSeasonInLabel = weekOptionsData.length > 1;
+  const weekOptionsHtml = [
+    `<option value=""${selectedWeekKey ? '' : ' selected'}>All Weeks</option>`,
+    ...weekOptionsData.map((option) => {
+      const selectedAttr = option.key === selectedWeekKey ? ' selected' : '';
+      return `<option value="${escapeHtml(option.key)}"${selectedAttr}>${escapeHtml(formatWeekLabel(option.season, option.week, includeSeasonInLabel))}</option>`;
+    }),
+  ].join('');
+
+  const gameOptionsHtml = [
+    `<option value=""${selectedGameKey ? '' : ' selected'}>All Games</option>`,
+    ...Array.from(gameMap.entries()).map(([key, label]) => {
+      const selectedAttr = key === selectedGameKey ? ' selected' : '';
+      return `<option value="${escapeHtml(key)}"${selectedAttr}>${escapeHtml(label)}</option>`;
+    }),
+  ].join('');
+
+  const filtersHtml = `
+    <div class="ev-controls elo-filters">
+      <label for="eloWeekSelect" class="ev-select-label">Week</label>
+      <select id="eloWeekSelect">${weekOptionsHtml}</select>
+      <label for="eloGameSelect" class="ev-select-label">Game</label>
+      <select id="eloGameSelect">${gameOptionsHtml}</select>
+    </div>
+  `;
 
   if (!usablePredictions.length) {
-    return '<p class="hint">No games with complete market data are available yet.</p>';
+    const message = baseFiltered.length
+      ? '<p class="hint">No games with complete market data match the selected filters.</p>'
+      : '<p class="hint">No upcoming games match the selected filters.</p>';
+    return `
+      <section class="collapsible" data-section="predictions">
+        <div class="collapsible-header" role="button" tabindex="0" aria-expanded="true">Upcoming Games</div>
+        <div class="collapsible-body">
+          ${filtersHtml}
+          ${message}
+        </div>
+      </section>
+    `;
   }
 
   const rows = usablePredictions.map((row) => {
@@ -757,11 +954,14 @@ const renderPredictionsTable = (predictions) => {
       </tr>
     `;
   }).join('');
+
   const explainer = '<p class="hint explanation">Home Win % maps Elo rating differences to probabilities; Model Spread divides the rating edge by 25 Elo-per-point; Fair ML is the model moneyline. Market columns use uploaded CSVs when provided or the latest consensus from The Odds API.</p>';
+
   return `
     <section class="collapsible" data-section="predictions">
       <div class="collapsible-header" role="button" tabindex="0" aria-expanded="true">Upcoming Games</div>
       <div class="collapsible-body">
+        ${filtersHtml}
         ${explainer}
         <table class="data-table" data-sortable="true">
           <thead>
@@ -789,7 +989,7 @@ const createMoneylineMetrics = (prediction, consensus, inputs, side) => {
   const numericOdds = oddsRaw === '' ? null : Number(oddsRaw);
   const validOdds = Number.isFinite(numericOdds) ? numericOdds : null;
   const modelProb = side === 'home' ? prediction.homeWinProb : prediction.awayWinProb;
-  const consensusPoint = consensus?.moneyline?.[side] || null;
+  const consensusPoint = getConsensusMoneyline(consensus, side);
   const consensusProb = consensusPoint?.prob ?? null;
   const consensusOdds = consensusPoint?.odds ?? null;
   const implied = validOdds === null ? null : oddsToProb(validOdds);
@@ -801,17 +1001,26 @@ const createMoneylineMetrics = (prediction, consensus, inputs, side) => {
     modelEv: validOdds === null || modelProb === null ? null : expectedValue(modelProb, validOdds),
     consensusEv: validOdds === null || consensusProb === null ? null : expectedValue(consensusProb, validOdds),
     bestOdds: consensusOdds,
-    bestBook: consensusPoint?.book || null,
+    bestBook: consensusPoint?.label || null,
+    sampleSize: consensusPoint?.sampleSize ?? null,
   };
 };
 
 const getSpreadEntry = (consensus, line, side) => {
   if (!consensus || !consensus.spreads || line === null || line === '') return null;
-  const pointKey = normalizePoint(side === 'home' ? line : -line);
+  const adjustedLine = side === 'home' ? line : -line;
+  const pointKey = normalizePoint(adjustedLine);
   if (pointKey === null) return null;
   const entry = consensus.spreads.get(pointKey);
   if (!entry) return null;
-  return side === 'home' ? entry.home && { ...entry.home, point: entry.pointHome } : entry.away && { ...entry.away, point: entry.pointAway };
+  const bucket = side === 'home' ? entry.home : entry.away;
+  if (!bucket || !bucket.consensus) return null;
+  return {
+    odds: bucket.consensus.odds,
+    prob: bucket.consensus.prob,
+    sampleSize: bucket.consensus.sampleSize,
+    line: side === 'home' ? entry.pointHome : entry.pointAway,
+  };
 };
 
 const createSpreadMetrics = (prediction, consensus, inputs, side) => {
@@ -836,7 +1045,7 @@ const createSpreadMetrics = (prediction, consensus, inputs, side) => {
     modelEv: validOdds === null || modelProb === null ? null : expectedValue(modelProb, validOdds),
     consensusEv: validOdds === null || consensusProb === null ? null : expectedValue(consensusProb, validOdds),
     bestOdds: consensusEntry?.odds ?? null,
-    bestBook: consensusEntry?.book ?? null,
+    bestBook: consensusEntry ? sampleSizeLabel(consensusEntry.sampleSize) : null,
     modelEdgePoints: validLine === null ? null : (side === 'home' ? prediction.modelSpread - validLine : validLine + prediction.modelSpread),
   };
 };
@@ -847,49 +1056,14 @@ const getTotalEntry = (consensus, line, side) => {
   if (pointKey === null) return null;
   const entry = consensus.totals.get(pointKey);
   if (!entry) return null;
-  return side === 'over' ? entry.over : entry.under;
-};
-
-const findBestSpread = (consensus, side) => {
-  if (!consensus || !consensus.spreads) return null;
-  let best = null;
-  consensus.spreads.forEach((entry) => {
-    const outcome = side === 'home' ? entry.home : entry.away;
-    if (!outcome || outcome.odds === null || outcome.odds === undefined) return;
-    const decimal = americanToDecimal(outcome.odds);
-    if (decimal === null) return;
-    if (!best || decimal > best.decimal) {
-      best = {
-        line: side === 'home' ? entry.pointHome : entry.pointAway,
-        odds: outcome.odds,
-        book: outcome.book || null,
-        decimal,
-      };
-    }
-  });
-  if (best) delete best.decimal;
-  return best;
-};
-
-const findBestTotal = (consensus, side) => {
-  if (!consensus || !consensus.totals) return null;
-  let best = null;
-  consensus.totals.forEach((entry) => {
-    const outcome = side === 'over' ? entry.over : entry.under;
-    if (!outcome || outcome.odds === null || outcome.odds === undefined) return;
-    const decimal = americanToDecimal(outcome.odds);
-    if (decimal === null) return;
-    if (!best || decimal > best.decimal) {
-      best = {
-        line: entry.point,
-        odds: outcome.odds,
-        book: outcome.book || null,
-        decimal,
-      };
-    }
-  });
-  if (best) delete best.decimal;
-  return best;
+  const bucket = side === 'over' ? entry.over : entry.under;
+  if (!bucket || !bucket.consensus) return null;
+  return {
+    odds: bucket.consensus.odds,
+    prob: bucket.consensus.prob,
+    sampleSize: bucket.consensus.sampleSize,
+    line: entry.point,
+  };
 };
 
 const applyConsensusToPredictions = () => {
@@ -901,40 +1075,34 @@ const applyConsensusToPredictions = () => {
     const clone = { ...prediction };
     let mutated = false;
 
-    const homeMlNode = consensus.moneyline?.home;
-    if (homeMlNode && homeMlNode.odds !== null && homeMlNode.odds !== undefined) {
-      const odds = Number(homeMlNode.odds);
-      if (Number.isFinite(odds)) {
-        clone.homeMoneyline = odds;
-        const implied = Number.isFinite(homeMlNode.prob) ? homeMlNode.prob : oddsToProb(odds);
-        clone.homeMoneylineImplied = implied;
-        clone.homeMoneylineEdge = implied === null ? null : clone.homeWinProb - implied;
-        mutated = true;
-      }
-    }
-
-    const awayMlNode = consensus.moneyline?.away;
-    if (awayMlNode && awayMlNode.odds !== null && awayMlNode.odds !== undefined) {
-      const odds = Number(awayMlNode.odds);
-      if (Number.isFinite(odds)) {
-        clone.awayMoneyline = odds;
-        const implied = Number.isFinite(awayMlNode.prob) ? awayMlNode.prob : oddsToProb(odds);
-        clone.awayMoneylineImplied = implied;
-        clone.awayMoneylineEdge = implied === null ? null : clone.awayWinProb - implied;
-        mutated = true;
-      }
-    }
-
-    const bestHomeSpread = findBestSpread(consensus, 'home');
-    if (bestHomeSpread && Number.isFinite(bestHomeSpread.line)) {
-      clone.marketSpread = bestHomeSpread.line;
-      clone.homeSpreadEdge = bestHomeSpread.line - clone.modelSpread;
+    const homeMlNode = getConsensusMoneyline(consensus, 'home');
+    if (homeMlNode && Number.isFinite(homeMlNode.odds)) {
+      clone.homeMoneyline = homeMlNode.odds;
+      const implied = Number.isFinite(homeMlNode.prob) ? homeMlNode.prob : oddsToProb(homeMlNode.odds);
+      clone.homeMoneylineImplied = implied;
+      clone.homeMoneylineEdge = implied === null ? null : clone.homeWinProb - implied;
       mutated = true;
     }
 
-    const bestOverTotal = findBestTotal(consensus, 'over');
-    if (bestOverTotal && Number.isFinite(bestOverTotal.line)) {
-      clone.marketTotal = bestOverTotal.line;
+    const awayMlNode = getConsensusMoneyline(consensus, 'away');
+    if (awayMlNode && Number.isFinite(awayMlNode.odds)) {
+      clone.awayMoneyline = awayMlNode.odds;
+      const implied = Number.isFinite(awayMlNode.prob) ? awayMlNode.prob : oddsToProb(awayMlNode.odds);
+      clone.awayMoneylineImplied = implied;
+      clone.awayMoneylineEdge = implied === null ? null : clone.awayWinProb - implied;
+      mutated = true;
+    }
+
+    const homeSpreadConsensus = getConsensusSpread(consensus, 'home');
+    if (homeSpreadConsensus && Number.isFinite(homeSpreadConsensus.line)) {
+      clone.marketSpread = homeSpreadConsensus.line;
+      clone.homeSpreadEdge = homeSpreadConsensus.line - clone.modelSpread;
+      mutated = true;
+    }
+
+    const totalConsensus = getConsensusTotal(consensus, 'over');
+    if (totalConsensus && Number.isFinite(totalConsensus.line)) {
+      clone.marketTotal = totalConsensus.line;
       mutated = true;
     }
 
@@ -967,7 +1135,7 @@ const createTotalMetrics = (consensus, inputs, side) => {
     consensusProb,
     consensusEv: validOdds === null || consensusProb === null ? null : expectedValue(consensusProb, validOdds),
     bestOdds: consensusEntry?.odds ?? null,
-    bestBook: consensusEntry?.book ?? null,
+    bestBook: consensusEntry ? sampleSizeLabel(consensusEntry.sampleSize) : null,
   };
 };
 
@@ -1079,7 +1247,7 @@ const renderEvCalculator = (focusInfo) => {
     </div>
   `;
 
-  const describeConsensus = (label, odds, book) => {
+  const describeConsensus = (label, odds, descriptor) => {
     if ((label === null || label === undefined || label === '') && (odds === null || odds === undefined)) return '-';
     const pieces = [];
     if (label !== null && label !== undefined && label !== '') pieces.push(label);
@@ -1088,7 +1256,7 @@ const renderEvCalculator = (focusInfo) => {
       pieces.push(num > 0 ? `+${num}` : String(num));
     }
     const textParts = pieces.join(' · ');
-    return `${textParts}${book ? ` (${book})` : ''}`;
+    return `${textParts}${descriptor ? ` (${descriptor})` : ''}`;
   };
 
   const groupSection = (title, cards) => `
@@ -1107,17 +1275,17 @@ const renderEvCalculator = (focusInfo) => {
   const totalOver = createTotalMetrics(consensus, inputs, 'over');
   const totalUnder = createTotalMetrics(consensus, inputs, 'under');
 
-  const bestSpread = {
-    home: findBestSpread(consensus, 'home'),
-    away: findBestSpread(consensus, 'away'),
+  const spreadConsensus = {
+    home: getConsensusSpread(consensus, 'home'),
+    away: getConsensusSpread(consensus, 'away'),
   };
-  const bestTotal = {
-    over: findBestTotal(consensus, 'over'),
-    under: findBestTotal(consensus, 'under'),
+  const totalConsensus = {
+    over: getConsensusTotal(consensus, 'over'),
+    under: getConsensusTotal(consensus, 'under'),
   };
-  const bestMoneyline = {
-    home: consensus?.moneyline?.home || null,
-    away: consensus?.moneyline?.away || null,
+  const moneylineConsensus = {
+    home: getConsensusMoneyline(consensus, 'home'),
+    away: getConsensusMoneyline(consensus, 'away'),
   };
 
   const dateLabel = prediction.date ? new Date(prediction.date).toISOString().slice(0, 10) : '';
@@ -1126,7 +1294,7 @@ const renderEvCalculator = (focusInfo) => {
     const modelLine = side === 'home' ? prediction.modelSpread : -prediction.modelSpread;
     const consensusLine = best?.line ?? null;
     const consensusOdds = best?.odds ?? null;
-    const consensusBook = best?.book ?? null;
+    const consensusDescriptor = best?.label ?? null;
     const marketDiff = consensusLine === null ? null : consensusLine - modelLine;
     const modelEdgeProb = metrics.implied === null || metrics.modelProb === null ? null : metrics.modelProb - metrics.implied;
     const marketEdgeProb = metrics.implied === null || metrics.consensusProb === null ? null : metrics.consensusProb - metrics.implied;
@@ -1142,7 +1310,7 @@ const renderEvCalculator = (focusInfo) => {
         </div>
         <div class="ev-card-details">
           ${detailRow('Model Line', formatSpreadLine(modelLine))}
-          ${detailRow('Consensus', describeConsensus(consensusLine === null ? '' : formatSpreadLine(consensusLine), consensusOdds, consensusBook))}
+          ${detailRow('Consensus', describeConsensus(consensusLine === null ? '' : formatSpreadLine(consensusLine), consensusOdds, consensusDescriptor))}
           ${marketDiff === null ? '' : detailRow('Market − Model', `${formatSigned(marketDiff, 1)} pts`)}
         </div>
         <div class="ev-inputs">
@@ -1172,7 +1340,7 @@ const renderEvCalculator = (focusInfo) => {
     const modelProb = side === 'home' ? prediction.homeWinProb : prediction.awayWinProb;
     const fairMl = side === 'home' ? prediction.homeFairMoneyline : prediction.awayFairMoneyline;
     const consensusOdds = best?.odds ?? null;
-    const consensusBook = best?.book ?? null;
+    const consensusDescriptor = best?.label ?? null;
     const consensusProb = metrics.consensusProb;
     const modelEdgeProb = metrics.implied === null || metrics.modelProb === null ? null : metrics.modelProb - metrics.implied;
     const marketEdgeProb = metrics.implied === null || consensusProb === null ? null : consensusProb - metrics.implied;
@@ -1187,7 +1355,7 @@ const renderEvCalculator = (focusInfo) => {
         <div class="ev-card-details">
           ${detailRow('Model Win %', formatPercent(modelProb))}
           ${detailRow('Model Fair ML', formatMoneyline(fairMl))}
-          ${detailRow('Consensus', describeConsensus('', consensusOdds, consensusBook))}
+          ${detailRow('Consensus', describeConsensus('', consensusOdds, consensusDescriptor))}
           ${detailRow('Consensus Win %', formatPercent(consensusProb))}
         </div>
         <div class="ev-inputs">
@@ -1209,7 +1377,7 @@ const renderEvCalculator = (focusInfo) => {
     const label = side === 'over' ? 'Over' : 'Under';
     const consensusLine = best?.line ?? null;
     const consensusOdds = best?.odds ?? null;
-    const consensusBook = best?.book ?? null;
+    const consensusDescriptor = best?.label ?? null;
     const placeholderLine = consensusLine === null || consensusLine === undefined ? '' : Number(consensusLine).toFixed(1);
     const placeholderOdds = consensusOdds === null || consensusOdds === undefined ? '' : (Number(consensusOdds) > 0 ? `+${Number(consensusOdds)}` : String(Number(consensusOdds)));
     const lineValue = escapeHtml(inputData.line);
@@ -1222,7 +1390,7 @@ const renderEvCalculator = (focusInfo) => {
           <span class="ev-tag">Total</span>
         </div>
         <div class="ev-card-details">
-          ${detailRow('Consensus', describeConsensus(consensusLine === null ? '' : formatNumber(consensusLine, 1), consensusOdds, consensusBook))}
+          ${detailRow('Consensus', describeConsensus(consensusLine === null ? '' : formatNumber(consensusLine, 1), consensusOdds, consensusDescriptor))}
         </div>
         <div class="ev-inputs">
           <div class="ev-input-row">
@@ -1259,16 +1427,16 @@ const renderEvCalculator = (focusInfo) => {
       </header>
       <div class="ev-board">
         ${groupSection('Moneyline', [
-          moneylineCard('home', mlHome, bestMoneyline.home, inputs.moneyline.home),
-          moneylineCard('away', mlAway, bestMoneyline.away, inputs.moneyline.away),
+          moneylineCard('away', mlAway, moneylineConsensus.away, inputs.moneyline.away),
+          moneylineCard('home', mlHome, moneylineConsensus.home, inputs.moneyline.home),
         ])}
         ${groupSection('Spread', [
-          spreadCard('home', spreadHome, bestSpread.home, inputs.spread.home),
-          spreadCard('away', spreadAway, bestSpread.away, inputs.spread.away),
+          spreadCard('away', spreadAway, spreadConsensus.away, inputs.spread.away),
+          spreadCard('home', spreadHome, spreadConsensus.home, inputs.spread.home),
         ])}
         ${groupSection('Totals', [
-          totalCard('over', totalOver, bestTotal.over, inputs.total.over),
-          totalCard('under', totalUnder, bestTotal.under, inputs.total.under),
+          totalCard('over', totalOver, totalConsensus.over, inputs.total.over),
+          totalCard('under', totalUnder, totalConsensus.under, inputs.total.under),
         ])}
       </div>
     </article>
@@ -1325,10 +1493,10 @@ const renderCustomSection = () => {
       const side = bet.betType === 'home_ml' ? 'home' : 'away';
       label = `${side === 'home' ? prediction.homeTeam : prediction.awayTeam} ML (${prediction.awayTeam} @ ${prediction.homeTeam})`;
       modelProb = side === 'home' ? prediction.homeWinProb : prediction.awayWinProb;
-      const consensusNode = consensus?.moneyline?.[side] || null;
+      const consensusNode = getConsensusMoneyline(consensus, side);
       consensusProb = consensusNode?.prob ?? null;
       bestOdds = consensusNode?.odds ?? null;
-      bestBook = consensusNode?.book ?? null;
+      bestBook = consensusNode?.label ?? null;
       if (implied !== null && modelProb !== null) modelEdge = modelProb - implied;
       modelEv = expectedValue(modelProb, bet.odds);
       if (implied !== null && consensusProb !== null) consensusEdge = consensusProb - implied;
@@ -1343,7 +1511,7 @@ const renderCustomSection = () => {
       const consensusEntry = getSpreadEntry(consensus, bet.line, side);
       consensusProb = consensusEntry?.prob ?? null;
       bestOdds = consensusEntry?.odds ?? null;
-      bestBook = consensusEntry?.book ?? null;
+      bestBook = consensusEntry ? sampleSizeLabel(consensusEntry.sampleSize) : null;
       if (implied !== null && modelProb !== null) modelEdge = modelProb - implied;
       modelEv = modelProb === null ? null : expectedValue(modelProb, bet.odds);
       if (implied !== null && consensusProb !== null) consensusEdge = consensusProb - implied;
@@ -1354,7 +1522,7 @@ const renderCustomSection = () => {
       const consensusEntry = getTotalEntry(consensus, bet.line, side);
       consensusProb = consensusEntry?.prob ?? null;
       bestOdds = consensusEntry?.odds ?? null;
-      bestBook = consensusEntry?.book ?? null;
+      bestBook = consensusEntry ? sampleSizeLabel(consensusEntry.sampleSize) : null;
       if (implied !== null && consensusProb !== null) consensusEdge = consensusProb - implied;
       consensusEvVal = consensusProb === null ? null : expectedValue(consensusProb, bet.odds);
     }
@@ -1388,7 +1556,7 @@ const renderCustomSection = () => {
             <th>Market Win %</th>
             <th>Market Edge</th>
             <th>Market EV</th>
-            <th>Best Market Odds</th>
+            <th>Consensus Odds</th>
             <th></th>
           </tr>
         </thead>
@@ -1414,6 +1582,29 @@ const renderEloSection = () => {
   const predictionsHtml = renderPredictionsTable(state.predictions || []);
   container.innerHTML = `${ratingsHtml}${predictionsHtml}`;
   initInteractiveSections(container);
+  attachEloFilters(container);
+};
+
+const attachEloFilters = (root) => {
+  if (!root) return;
+  const weekSelect = root.querySelector('#eloWeekSelect');
+  if (weekSelect) {
+    weekSelect.addEventListener('change', (event) => {
+      const value = event.target.value;
+      state.eloWeekFilter = value === '' ? null : value;
+      state.eloGameFilter = null;
+      renderEloSection();
+    });
+  }
+
+  const gameSelect = root.querySelector('#eloGameSelect');
+  if (gameSelect) {
+    gameSelect.addEventListener('change', (event) => {
+      const value = event.target.value;
+      state.eloGameFilter = value === '' ? null : value;
+      renderEloSection();
+    });
+  }
 };
 
 const attachEvInputs = (focusInfo) => {
@@ -1617,12 +1808,16 @@ const runModel = () => {
     state.predictions = predictions;
     state.predictionMap = buildPredictionMap(predictions);
     if (state.predictions.length) {
+      state.eloWeekFilter = findLatestWeekKey(state.predictions);
+      state.eloGameFilter = null;
       const firstKey = buildPredictionKey(state.predictions[0].homeTeam, state.predictions[0].awayTeam);
       if (!state.evSelectedGame || !state.predictionMap.has(state.evSelectedGame)) {
         state.evSelectedGame = firstKey;
       }
     } else {
       state.evSelectedGame = null;
+      state.eloWeekFilter = null;
+      state.eloGameFilter = null;
     }
     applyConsensusToPredictions();
 
