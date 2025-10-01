@@ -936,30 +936,43 @@ const renderPredictionsTable = (predictions) => {
   }
 
   const rows = usablePredictions.map((row) => {
+    const modelSpreadDisplay = formatSpreadLine(row.modelSpread);
     const marketSpreadDisplay = formatSpreadLine(row.marketSpread);
     const spreadEdgeDisplay = row.homeSpreadEdge === null || row.homeSpreadEdge === undefined
       ? '-'
       : `${formatSigned(row.homeSpreadEdge, 1)} pts`;
-    const homeMlDisplay = formatMoneyline(row.homeMoneyline);
+    const projectedMoneylineDisplay = formatMoneyline(row.homeFairMoneyline);
+    const sportsbookMoneylineDisplay = formatMoneyline(row.homeMoneyline);
     const mlEdgeDisplay = row.homeMoneylineEdge === null || row.homeMoneylineEdge === undefined
       ? '-'
       : formatSignedPercent(row.homeMoneylineEdge);
+    const spreadEdgeNumeric = Number(row.homeSpreadEdge);
+    const moneylineEdgeNumeric = Number(row.homeMoneylineEdge);
+    const hasSpreadEdge = row.homeSpreadEdge !== null && row.homeSpreadEdge !== undefined && row.homeSpreadEdge !== '' && Number.isFinite(spreadEdgeNumeric);
+    const hasMoneylineEdge = row.homeMoneylineEdge !== null && row.homeMoneylineEdge !== undefined && row.homeMoneylineEdge !== '' && Number.isFinite(moneylineEdgeNumeric);
+    let recommendation = 'No Bet';
+    if (hasSpreadEdge && spreadEdgeNumeric > 0) {
+      recommendation = 'Bet Home Spread';
+    } else if (hasMoneylineEdge && moneylineEdgeNumeric > 0) {
+      recommendation = 'Bet Home ML';
+    }
     return `
       <tr>
         <td data-sort-value="${row.homeTeam}">${row.homeTeam}</td>
         <td data-sort-value="${row.awayTeam}">${row.awayTeam}</td>
         <td data-sort-value="${row.homeWinProb}">${formatPercent(row.homeWinProb)}</td>
-        <td data-sort-value="${row.modelSpread}">${formatNumber(row.modelSpread, 1)}</td>
-        <td data-sort-value="${row.homeFairMoneyline ?? ''}">${formatMoneyline(row.homeFairMoneyline)}</td>
+        <td data-sort-value="${row.modelSpread ?? ''}">${modelSpreadDisplay}</td>
         <td data-sort-value="${row.marketSpread ?? ''}">${marketSpreadDisplay}</td>
         <td data-sort-value="${row.homeSpreadEdge ?? ''}">${spreadEdgeDisplay}</td>
-        <td data-sort-value="${row.homeMoneyline ?? ''}">${homeMlDisplay}</td>
+        <td data-sort-value="${row.homeFairMoneyline ?? ''}">${projectedMoneylineDisplay}</td>
+        <td data-sort-value="${row.homeMoneyline ?? ''}">${sportsbookMoneylineDisplay}</td>
         <td data-sort-value="${row.homeMoneylineEdge ?? ''}">${mlEdgeDisplay}</td>
+        <td data-sort-value="${recommendation}">${recommendation}</td>
       </tr>
     `;
   }).join('');
 
-  const explainer = '<p class="hint explanation">Home Win % maps Elo rating differences to probabilities; Model Spread divides the rating edge by 25 Elo-per-point; Fair ML is the model moneyline. Market columns use uploaded CSVs when provided or the latest consensus from The Odds API.</p>';
+  const explainer = '<p class="hint explanation">Model Win % converts Elo rating differences into a home victory probability. Projected Spread and Projected ML Odds come from the model; Sportsbook columns use uploaded lines or The Odds API consensus. Spread Value and Moneyline Value highlight edges versus the market and drive the automated Recommended Bet.</p>';
 
   return `
     <section class="collapsible" data-section="predictions">
@@ -969,16 +982,23 @@ const renderPredictionsTable = (predictions) => {
         ${explainer}
         <table class="data-table" data-sortable="true">
           <thead>
+            <tr class="group-header">
+              <th colspan="3">Basic Info</th>
+              <th colspan="3">Spread</th>
+              <th colspan="3">Moneyline</th>
+              <th colspan="1">Recommendation</th>
+            </tr>
             <tr>
               <th data-sort-key="home" data-sort-type="text" title="${getHeaderTooltip('predictions','home')}">Home</th>
               <th data-sort-key="away" data-sort-type="text" title="${getHeaderTooltip('predictions','away')}">Away</th>
-              <th data-sort-key="prob" data-sort-type="number" title="${getHeaderTooltip('predictions','prob')}">Home Win %</th>
-              <th data-sort-key="spread" data-sort-type="number" title="${getHeaderTooltip('predictions','spread')}">Model Spread</th>
-              <th data-sort-key="fairml" data-sort-type="number" title="${getHeaderTooltip('predictions','fairml')}">Fair ML</th>
-              <th data-sort-key="marketspread" data-sort-type="number" title="${getHeaderTooltip('predictions','marketspread')}">Market Spread</th>
-              <th data-sort-key="spreadedge" data-sort-type="number" title="${getHeaderTooltip('predictions','spreadedge')}">Spread Edge</th>
-              <th data-sort-key="ml" data-sort-type="number" title="${getHeaderTooltip('predictions','ml')}">Home ML</th>
-              <th data-sort-key="mledge" data-sort-type="number" title="${getHeaderTooltip('predictions','mledge')}">ML Edge</th>
+              <th data-sort-key="prob" data-sort-type="number" title="${getHeaderTooltip('predictions','prob')}">Model Win % (Home)</th>
+              <th data-sort-key="spread" data-sort-type="number" title="${getHeaderTooltip('predictions','spread')}">Projected Spread</th>
+              <th data-sort-key="marketspread" data-sort-type="number" title="${getHeaderTooltip('predictions','marketspread')}">Sportsbook Spread</th>
+              <th data-sort-key="spreadedge" data-sort-type="number" title="${getHeaderTooltip('predictions','spreadedge')}">Spread Value (+/- pts)</th>
+              <th data-sort-key="fairml" data-sort-type="number" title="${getHeaderTooltip('predictions','fairml')}">Projected ML Odds</th>
+              <th data-sort-key="ml" data-sort-type="number" title="${getHeaderTooltip('predictions','ml')}">Sportsbook ML Odds</th>
+              <th data-sort-key="mledge" data-sort-type="number" title="${getHeaderTooltip('predictions','mledge')}">Moneyline Value %</th>
+              <th data-sort-key="recommendation" data-sort-type="text">Recommended Bet</th>
             </tr>
           </thead>
           <tbody>${rows}</tbody>
