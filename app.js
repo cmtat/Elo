@@ -1253,7 +1253,8 @@ const renderEvCalculator = (focusInfo) => {
     if (label !== null && label !== undefined && label !== '') pieces.push(label);
     if (odds !== null && odds !== undefined && !Number.isNaN(Number(odds))) {
       const num = Number(odds);
-      pieces.push(num > 0 ? `+${num}` : String(num));
+      const rounded = Math.round(num);
+      pieces.push(rounded > 0 ? `+${rounded}` : String(rounded));
     }
     const textParts = pieces.join(' · ');
     return `${textParts}${descriptor ? ` (${descriptor})` : ''}`;
