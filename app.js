@@ -767,8 +767,12 @@ const formatSignedPercent = (value) => {
 };
 
 const formatMoneyline = (value) => {
-  if (value === null || value === undefined || Number.isNaN(value)) return '-';
-  return value > 0 ? `+${value}` : String(value);
+  if (value === null || value === undefined || value === '') return '-';
+  const num = Number(value);
+  if (!Number.isFinite(num)) return '-';
+  const rounded = Math.round(num);
+  if (rounded === 0) return '0';
+  return rounded > 0 ? `+${rounded}` : String(rounded);
 };
 
 const formatEv = (value) => {
@@ -1319,7 +1323,11 @@ const renderEvCalculator = (focusInfo) => {
     const modelEdgeProb = metrics.implied === null || metrics.modelProb === null ? null : metrics.modelProb - metrics.implied;
     const marketEdgeProb = metrics.implied === null || metrics.consensusProb === null ? null : metrics.consensusProb - metrics.implied;
     const placeholderLine = consensusLine === null || consensusLine === undefined ? '' : formatSpreadLine(consensusLine);
-    const placeholderOdds = consensusOdds === null || consensusOdds === undefined ? '' : (Number(consensusOdds) > 0 ? `+${Number(consensusOdds)}` : String(Number(consensusOdds)));
+    const placeholderOdds = (() => {
+      if (consensusOdds === null || consensusOdds === undefined) return '';
+      const formatted = formatMoneyline(consensusOdds);
+      return formatted === '-' ? '' : formatted;
+    })();
     const rawLineValue = inputData.line;
     const rawOddsValue = inputData.odds;
     const lineValue = escapeHtml(rawLineValue);
@@ -1374,7 +1382,11 @@ const renderEvCalculator = (focusInfo) => {
     const consensusProb = metrics.consensusProb;
     const modelEdgeProb = metrics.implied === null || metrics.modelProb === null ? null : metrics.modelProb - metrics.implied;
     const marketEdgeProb = metrics.implied === null || consensusProb === null ? null : consensusProb - metrics.implied;
-    const placeholderOdds = consensusOdds === null || consensusOdds === undefined ? '' : (Number(consensusOdds) > 0 ? `+${Number(consensusOdds)}` : String(Number(consensusOdds)));
+    const placeholderOdds = (() => {
+      if (consensusOdds === null || consensusOdds === undefined) return '';
+      const formatted = formatMoneyline(consensusOdds);
+      return formatted === '-' ? '' : formatted;
+    })();
     const rawOddsValue = inputValue;
     const oddsValue = escapeHtml(rawOddsValue);
     const oddsToggle = renderSignToggle(selectedKey, 'moneyline', side, 'odds', rawOddsValue, consensusOdds);
@@ -1414,7 +1426,11 @@ const renderEvCalculator = (focusInfo) => {
     const consensusOdds = best?.odds ?? null;
     const consensusDescriptor = best?.label ?? null;
     const placeholderLine = consensusLine === null || consensusLine === undefined ? '' : Number(consensusLine).toFixed(1);
-    const placeholderOdds = consensusOdds === null || consensusOdds === undefined ? '' : (Number(consensusOdds) > 0 ? `+${Number(consensusOdds)}` : String(Number(consensusOdds)));
+    const placeholderOdds = (() => {
+      if (consensusOdds === null || consensusOdds === undefined) return '';
+      const formatted = formatMoneyline(consensusOdds);
+      return formatted === '-' ? '' : formatted;
+    })();
     const rawLineValue = inputData.line;
     const rawOddsValue = inputData.odds;
     const lineValue = escapeHtml(rawLineValue);
