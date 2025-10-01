@@ -566,6 +566,32 @@ footer {
   color: var(--text);
 }
 
+.ev-input-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ev-input-wrapper input {
+  flex: 1;
+}
+
+.ev-sign-toggle {
+  flex-shrink: 0;
+  padding: 0 10px;
+  height: 34px;
+  border-radius: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  background: rgba(30, 41, 59, 0.95);
+  color: var(--text);
+  font-weight: 600;
+}
+
+.ev-sign-toggle:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 .ev-input-row {
   display: flex;
   gap: 8px;

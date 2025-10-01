@@ -1260,6 +1260,25 @@ const renderEvCalculator = (focusInfo) => {
     return `${textParts}${descriptor ? ` (${descriptor})` : ''}`;
   };
 
+  const getSignSymbol = (rawValue, fallback) => {
+    if (typeof rawValue === 'string') {
+      const trimmed = rawValue.trim();
+      if (trimmed.startsWith('-')) return '-';
+      if (trimmed.startsWith('+')) return '+';
+      if (trimmed.length) return '+';
+    }
+    if (fallback !== null && fallback !== undefined && fallback !== '') {
+      const num = Number(fallback);
+      if (Number.isFinite(num)) return num < 0 ? '-' : '+';
+    }
+    return '+';
+  };
+
+  const renderSignToggle = (gameKey, evType, side, field, rawValue, fallback) => {
+    const sign = getSignSymbol(rawValue, fallback);
+    return `<button type="button" class="ev-sign-toggle" data-ev-sign-toggle data-game="${gameKey}" data-ev-type="${evType}" data-ev-side="${side}" data-ev-field="${field}" aria-label="Toggle sign">${sign}</button>`;
+  };
+
   const groupSection = (title, cards) => `
     <section class="ev-group">
       <div class="ev-group-title">${title}</div>
@@ -1301,8 +1320,12 @@ const renderEvCalculator = (focusInfo) => {
     const marketEdgeProb = metrics.implied === null || metrics.consensusProb === null ? null : metrics.consensusProb - metrics.implied;
     const placeholderLine = consensusLine === null || consensusLine === undefined ? '' : formatSpreadLine(consensusLine);
     const placeholderOdds = consensusOdds === null || consensusOdds === undefined ? '' : (Number(consensusOdds) > 0 ? `+${Number(consensusOdds)}` : String(Number(consensusOdds)));
-    const lineValue = escapeHtml(inputData.line);
-    const oddsValue = escapeHtml(inputData.odds);
+    const rawLineValue = inputData.line;
+    const rawOddsValue = inputData.odds;
+    const lineValue = escapeHtml(rawLineValue);
+    const oddsValue = escapeHtml(rawOddsValue);
+    const lineToggle = renderSignToggle(selectedKey, 'spread', side, 'line', rawLineValue, consensusLine);
+    const oddsToggle = renderSignToggle(selectedKey, 'spread', side, 'odds', rawOddsValue, consensusOdds);
     return `
       <div class="ev-card">
         <div class="ev-card-header">
@@ -1317,10 +1340,16 @@ const renderEvCalculator = (focusInfo) => {
         <div class="ev-inputs">
           <div class="ev-input-row">
             <label>Line
-              <input type="text" inputmode="decimal" data-ev-input data-ev-type="spread" data-ev-side="${side}" data-ev-field="line" data-game="${selectedKey}" value="${lineValue}" placeholder="${escapeHtml(placeholderLine)}" />
+              <div class="ev-input-wrapper">
+                ${lineToggle}
+                <input type="text" inputmode="decimal" data-ev-input data-ev-type="spread" data-ev-side="${side}" data-ev-field="line" data-game="${selectedKey}" value="${lineValue}" placeholder="${escapeHtml(placeholderLine)}" />
+              </div>
             </label>
             <label>Odds
-              <input type="text" inputmode="numeric" data-ev-input data-ev-type="spread" data-ev-side="${side}" data-ev-field="odds" data-game="${selectedKey}" value="${oddsValue}" placeholder="${escapeHtml(placeholderOdds)}" />
+              <div class="ev-input-wrapper">
+                ${oddsToggle}
+                <input type="text" inputmode="numeric" data-ev-input data-ev-type="spread" data-ev-side="${side}" data-ev-field="odds" data-game="${selectedKey}" value="${oddsValue}" placeholder="${escapeHtml(placeholderOdds)}" />
+              </div>
             </label>
           </div>
         </div>
@@ -1346,7 +1375,9 @@ const renderEvCalculator = (focusInfo) => {
     const modelEdgeProb = metrics.implied === null || metrics.modelProb === null ? null : metrics.modelProb - metrics.implied;
     const marketEdgeProb = metrics.implied === null || consensusProb === null ? null : consensusProb - metrics.implied;
     const placeholderOdds = consensusOdds === null || consensusOdds === undefined ? '' : (Number(consensusOdds) > 0 ? `+${Number(consensusOdds)}` : String(Number(consensusOdds)));
-    const oddsValue = escapeHtml(inputValue);
+    const rawOddsValue = inputValue;
+    const oddsValue = escapeHtml(rawOddsValue);
+    const oddsToggle = renderSignToggle(selectedKey, 'moneyline', side, 'odds', rawOddsValue, consensusOdds);
     return `
       <div class="ev-card">
         <div class="ev-card-header">
@@ -1361,7 +1392,10 @@ const renderEvCalculator = (focusInfo) => {
         </div>
         <div class="ev-inputs">
           <label>Odds
-            <input type="text" inputmode="numeric" data-ev-input data-ev-type="moneyline" data-ev-side="${side}" data-ev-field="odds" data-game="${selectedKey}" value="${oddsValue}" placeholder="${escapeHtml(placeholderOdds)}" />
+            <div class="ev-input-wrapper">
+              ${oddsToggle}
+              <input type="text" inputmode="numeric" data-ev-input data-ev-type="moneyline" data-ev-side="${side}" data-ev-field="odds" data-game="${selectedKey}" value="${oddsValue}" placeholder="${escapeHtml(placeholderOdds)}" />
+            </div>
           </label>
         </div>
         <div class="ev-results">
@@ -1381,8 +1415,12 @@ const renderEvCalculator = (focusInfo) => {
     const consensusDescriptor = best?.label ?? null;
     const placeholderLine = consensusLine === null || consensusLine === undefined ? '' : Number(consensusLine).toFixed(1);
     const placeholderOdds = consensusOdds === null || consensusOdds === undefined ? '' : (Number(consensusOdds) > 0 ? `+${Number(consensusOdds)}` : String(Number(consensusOdds)));
-    const lineValue = escapeHtml(inputData.line);
-    const oddsValue = escapeHtml(inputData.odds);
+    const rawLineValue = inputData.line;
+    const rawOddsValue = inputData.odds;
+    const lineValue = escapeHtml(rawLineValue);
+    const oddsValue = escapeHtml(rawOddsValue);
+    const lineToggle = renderSignToggle(selectedKey, 'total', side, 'line', rawLineValue, consensusLine);
+    const oddsToggle = renderSignToggle(selectedKey, 'total', side, 'odds', rawOddsValue, consensusOdds);
     const marketEdgeProb = metrics.implied === null || metrics.consensusProb === null ? null : metrics.consensusProb - metrics.implied;
     return `
       <div class="ev-card">
@@ -1396,10 +1434,16 @@ const renderEvCalculator = (focusInfo) => {
         <div class="ev-inputs">
           <div class="ev-input-row">
             <label>Line
-              <input type="text" inputmode="decimal" data-ev-input data-ev-type="total" data-ev-side="${side}" data-ev-field="line" data-game="${selectedKey}" value="${lineValue}" placeholder="${escapeHtml(placeholderLine)}" />
+              <div class="ev-input-wrapper">
+                ${lineToggle}
+                <input type="text" inputmode="decimal" data-ev-input data-ev-type="total" data-ev-side="${side}" data-ev-field="line" data-game="${selectedKey}" value="${lineValue}" placeholder="${escapeHtml(placeholderLine)}" />
+              </div>
             </label>
             <label>Odds
-              <input type="text" inputmode="numeric" data-ev-input data-ev-type="total" data-ev-side="${side}" data-ev-field="odds" data-game="${selectedKey}" value="${oddsValue}" placeholder="${escapeHtml(placeholderOdds)}" />
+              <div class="ev-input-wrapper">
+                ${oddsToggle}
+                <input type="text" inputmode="numeric" data-ev-input data-ev-type="total" data-ev-side="${side}" data-ev-field="odds" data-game="${selectedKey}" value="${oddsValue}" placeholder="${escapeHtml(placeholderOdds)}" />
+              </div>
             </label>
           </div>
         </div>
@@ -1636,6 +1680,20 @@ const attachEvInputs = (focusInfo) => {
     });
   }
 
+  const toggleSignValue = (raw) => {
+    const str = typeof raw === 'string' ? raw : String(raw ?? '');
+    const trimmed = str.trim();
+    if (!trimmed.length) return '-';
+    if (trimmed === '-') return '';
+    if (trimmed === '+') return '-';
+    if (trimmed.startsWith('-')) return trimmed.slice(1);
+    if (trimmed.startsWith('+')) {
+      const remainder = trimmed.slice(1);
+      return remainder.length ? `-${remainder}` : '-';
+    }
+    return `-${trimmed}`;
+  };
+
   document.querySelectorAll('[data-ev-input]').forEach((input) => {
     input.addEventListener('input', (event) => {
       const target = event.target;
@@ -1659,6 +1717,30 @@ const attachEvInputs = (focusInfo) => {
         if (field === 'odds') bucket.odds = value;
       }
       renderEvCalculator({ gameKey, evType, side, field, caret });
+    });
+  });
+
+  document.querySelectorAll('[data-ev-sign-toggle]').forEach((button) => {
+    button.addEventListener('click', (event) => {
+      event.preventDefault();
+      const gameKey = button.getAttribute('data-game');
+      const evType = button.getAttribute('data-ev-type');
+      const side = button.getAttribute('data-ev-side');
+      const field = button.getAttribute('data-ev-field');
+      if (!gameKey || !evType || !side || !field) return;
+      const selector = `[data-ev-input][data-game="${gameKey}"][data-ev-type="${evType}"][data-ev-side="${side}"][data-ev-field="${field}"]`;
+      const input = document.querySelector(selector);
+      if (!input) return;
+      const toggledValue = toggleSignValue(input.value);
+      input.value = toggledValue;
+      const caretPos = typeof toggledValue === 'string' ? toggledValue.length : input.value.length;
+      if (typeof input.focus === 'function') {
+        input.focus();
+      }
+      if (typeof input.setSelectionRange === 'function') {
+        input.setSelectionRange(caretPos, caretPos);
+      }
+      input.dispatchEvent(new Event('input', { bubbles: true }));
     });
   });
 
