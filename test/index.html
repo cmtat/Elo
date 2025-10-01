@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Firebase Auth Test Environment</title>
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+  <main class="auth-shell">
+    <section class="auth-card">
+      <h1>Firebase Auth Sandbox</h1>
+      <p class="lead">Use this isolated environment to verify login flows before rolling anything into production.</p>
+
+      <div class="status" id="authStatus">Checking authentication state…</div>
+      <div class="message" id="authMessage" hidden></div>
+
+      <div class="user-info" id="userInfo" hidden>
+        <h2>Current User</h2>
+        <dl>
+          <div>
+            <dt>Email</dt>
+            <dd id="userEmail">—</dd>
+          </div>
+          <div>
+            <dt>Display Name</dt>
+            <dd id="userDisplayName">—</dd>
+          </div>
+          <div>
+            <dt>UID</dt>
+            <dd id="userUid">—</dd>
+          </div>
+        </dl>
+        <button type="button" id="signOutBtn" class="secondary">Sign out</button>
+      </div>
+
+      <section class="auth-forms" id="authForms" hidden>
+        <details open>
+          <summary>Email + Password</summary>
+          <form id="registerForm" class="form-grid">
+            <h2>Create Account</h2>
+            <label>Email
+              <input type="email" name="email" required autocomplete="email" />
+            </label>
+            <label>Password
+              <input type="password" name="password" required autocomplete="new-password" minlength="6" />
+            </label>
+            <button type="submit">Register</button>
+          </form>
+
+          <form id="loginForm" class="form-grid">
+            <h2>Log In</h2>
+            <label>Email
+              <input type="email" name="email" required autocomplete="email" />
+            </label>
+            <label>Password
+              <input type="password" name="password" required autocomplete="current-password" minlength="6" />
+            </label>
+            <button type="submit">Log In</button>
+          </form>
+        </details>
+
+        <div class="providers">
+          <h2>Social Providers</h2>
+          <button type="button" id="googleSignIn" class="google">Continue with Google</button>
+        </div>
+      </section>
+    </section>
+
+    <section class="notes">
+      <h2>How to use this page</h2>
+      <ol>
+        <li>Create a Firebase project (or use an existing one) and enable the authentication providers you want to test.</li>
+        <li>Copy <code>firebaseConfig.sample.js</code> to <code>firebaseConfig.js</code> in this folder and paste your Firebase web app config values.</li>
+        <li>Serve this folder locally (e.g. with <code>npx serve test</code>) so the Firebase SDK can run. Opening the file directly won’t work due to module imports.</li>
+        <li>Use the forms above to register, sign in, and sign out. Watch the console for additional debug output.</li>
+      </ol>
+    </section>
+  </main>
+
+  <script type="module" src="./firebase-auth.js"></script>
+</body>
+</html>

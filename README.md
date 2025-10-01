@@ -70,6 +70,17 @@ Open `index.html` in your browser (or host the repo with GitHub Pages). The UI i
 
 Everything runs client-side—no backend required.
 
+### Firebase Auth Test Environment
+
+A sandbox for experimenting with Firebase authentication lives in `test/`.
+
+1. Create a Firebase project (or reuse an existing one) and enable the auth providers you want to try (Email/Password, Google, etc.).
+2. Copy `test/firebaseConfig.sample.js` to `test/firebaseConfig.js` and paste the configuration snippet from your Firebase web app settings.
+3. Serve the folder locally (for example: `npx serve test`) so the ES module imports work—opening the HTML file directly from disk will be blocked by the browser.
+4. Visit the served page and use the forms to register, log in, test providers, and sign out. The UI shows the currently signed-in user and surfaces Firebase errors inline for quick debugging.
+
+The test environment is isolated from the main app, so you can evolve the login flow there before deciding how to integrate it into production.
+
 ## Input Data Contracts
 
 Both the CLI and web app expect the following columns (extra columns are ignored):
