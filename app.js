@@ -40,7 +40,7 @@ const state = {
   apiKey: '',
   apiLoading: false,
   apiStatus: null,
-  activeTab: 'elo',
+  activeTab: 'input',
 };
 
 const HEADER_TOOLTIPS = {
@@ -1842,12 +1842,12 @@ const renderBestEvTab = () => {
   }
 
   if (!state.sportsbookData.length) {
-    container.innerHTML = '<p class="hint">Load sportsbook odds in the EV Calculator tab to evaluate best bets.</p>';
+    container.innerHTML = '<p class="hint">Load sportsbook odds in the Input tab to evaluate best bets.</p>';
     return;
   }
 
   if (!state.evBookSelection || state.evBookSelection === 'manual') {
-    container.innerHTML = '<p class="hint">Select a sportsbook from the EV Calculator tab to use its prices.</p>';
+    container.innerHTML = '<p class="hint">Select a sportsbook from the Input tab to use its prices.</p>';
     return;
   }
 

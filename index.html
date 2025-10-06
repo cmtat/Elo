@@ -14,17 +14,30 @@
   </header>
 
   <nav class="tab-nav">
-    <button class="tab-button active" data-tab="elo">Elo Model Ratings</button>
-    <button class="tab-button" data-tab="ev">EV Calculator</button>
-    <button class="tab-button" data-tab="bestEv">Best EV Bets</button>
+    <button class="tab-button active" data-tab="input">Input</button>
+    <button class="tab-button" data-tab="ev">EV</button>
+    <button class="tab-button" data-tab="elo">Elo Model</button>
     <button class="tab-button" data-tab="custom">Custom Bet Comparison</button>
   </nav>
 
   <main>
-    <section id="tab-elo" class="tab-section active">
+    <section id="tab-input" class="tab-section active">
       <section class="panel">
-        <h2>Data Inputs</h2>
-        <p class="hint">Upload historical games, upcoming schedule, and optional market lines or auto-fetch nflverse data.</p>
+        <h2>Fetch Latest Data</h2>
+        <p class="hint">Choose the season to pull from nflverse. You can override any file below if you want to load custom CSVs.</p>
+        <div class="auto-fetch">
+          <div class="auto-controls">
+            <label for="seasonInput">Season (comma/range allowed):</label>
+            <input id="seasonInput" type="text" value="2025" autocomplete="off" />
+            <button id="autoFetchBtn" type="button">Fetch Latest Data</button>
+          </div>
+          <p id="autoStatus" class="hint">Awaiting auto fetch (optional).</p>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>Upload Data (Optional)</h2>
+        <p class="hint">Upload historical games, upcoming schedule, and sportsbook lines if you prefer manual data.</p>
         <div class="input-grid">
           <label class="file-input">
             <span class="input-title">Completed Games</span>
@@ -42,33 +55,11 @@
             <span class="input-desc">Spread or moneyline odds for edge calculations.</span>
           </label>
         </div>
-
-        <div class="auto-fetch">
-          <h3>Auto-Fetch from nflverse</h3>
-          <div class="auto-controls">
-            <label for="seasonInput">Seasons (comma/range):</label>
-            <input id="seasonInput" type="text" value="2025" autocomplete="off" />
-            <button id="autoFetchBtn" type="button">Fetch Latest Data</button>
-          </div>
-          <p id="autoStatus" class="hint">Awaiting auto fetch (optional).</p>
-        </div>
       </section>
 
       <section class="panel">
-        <h2>Run Elo Model</h2>
-        <p class="hint">Defaults: base rating 1500, K=20, regression 25%, home field +55 Elo, 25 Elo per point spread.</p>
-        <button id="runBtn">Run Model</button>
-      </section>
-
-      <section id="eloOutputs" class="panel outputs">
-        <p>Waiting for input…</p>
-      </section>
-    </section>
-
-    <section id="tab-ev" class="tab-section">
-      <section class="panel">
-        <h2>EV Calculator</h2>
-        <p class="hint">Enter your The Odds API key to pull current sportsbook prices (US region, moneyline markets).</p>
+        <h2>Sportsbook Odds</h2>
+        <p class="hint">Enter your The Odds API key to load current sportsbook prices and select a book to prefill EV inputs.</p>
         <div class="api-controls">
           <input id="apiKeyInput" type="text" placeholder="The Odds API key" autocomplete="off" />
           <button id="loadOddsBtn" type="button">Load Sportsbook Lines</button>
@@ -81,18 +72,34 @@
         </div>
         <p id="apiStatus" class="hint"></p>
       </section>
-      <section class="panel" id="evContent">
-        <p class="hint">Run the Elo model and load sportsbook lines to view expected value by game.</p>
+
+      <section class="panel">
+        <h2>Run Model</h2>
+        <p class="hint">Click Run after fetching or uploading data to populate the other tabs.</p>
+        <button id="runBtn">Run Model</button>
       </section>
     </section>
 
-    <section id="tab-bestEv" class="tab-section">
+    <section id="tab-ev" class="tab-section">
       <section class="panel">
         <h2>Best EV Bets</h2>
         <p class="hint">Run the model, load sportsbook lines, and choose a book to see positive expected value wagers for the selected week.</p>
       </section>
       <section class="panel" id="bestEvContent">
-        <p class="hint">Select a sportsbook in the EV Calculator tab to populate this view.</p>
+        <p class="hint">Select a sportsbook in the Input tab to populate this view.</p>
+      </section>
+      <section class="panel">
+        <h2>EV Calculator</h2>
+        <p class="hint">Use the calculator to inspect a specific matchup and compare your odds to both the model and consensus.</p>
+      </section>
+      <section class="panel" id="evContent">
+        <p class="hint">Run the Elo model and load sportsbook lines to view expected value by game.</p>
+      </section>
+    </section>
+
+    <section id="tab-elo" class="tab-section">
+      <section id="eloOutputs" class="panel outputs">
+        <p>Waiting for input…</p>
       </section>
     </section>
 
