@@ -72,6 +72,12 @@
           <input id="apiKeyInput" type="text" placeholder="The Odds API key" autocomplete="off" />
           <button id="loadOddsBtn" type="button">Load Sportsbook Lines</button>
         </div>
+        <div class="book-controls">
+          <label for="bookSelect">Prefill odds from</label>
+          <select id="bookSelect" disabled>
+            <option value="manual">Manual entry</option>
+          </select>
+        </div>
         <p id="apiStatus" class="hint"></p>
       </section>
       <section class="panel" id="evContent">

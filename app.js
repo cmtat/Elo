@@ -32,6 +32,7 @@ const state = {
   evInputs: {},
   evSelectedGame: null,
   evWeekFilter: null,
+  evBookSelection: 'manual',
   eloWeekFilter: null,
   eloGameFilter: null,
   customBets: [],
@@ -733,6 +734,192 @@ const getEvInput = (gameKey) => {
     state.evInputs[gameKey] = getDefaultEvInput();
   }
   return state.evInputs[gameKey];
+};
+
+const formatOddsInput = (value) => {
+  if (value === null || value === undefined || value === '') return '';
+  const num = Number(value);
+  if (!Number.isFinite(num)) return '';
+  if (num === 0) return '0';
+  return num > 0 ? `+${String(num)}` : String(num);
+};
+
+const formatLineInput = (value) => {
+  if (value === null || value === undefined || value === '') return '';
+  const num = Number(value);
+  if (!Number.isFinite(num)) return '';
+  return Number.isInteger(num) ? String(num) : num.toFixed(1);
+};
+
+const clearEvInput = (input) => {
+  input.moneyline.home = '';
+  input.moneyline.away = '';
+  input.spread.home.line = '';
+  input.spread.home.odds = '';
+  input.spread.away.line = '';
+  input.spread.away.odds = '';
+  input.total.over.line = '';
+  input.total.over.odds = '';
+  input.total.under.line = '';
+  input.total.under.odds = '';
+};
+
+const collectBookOptions = () => {
+  const options = new Map();
+  state.sportsbookData.forEach((event) => {
+    (event.bookmakers || []).forEach((book) => {
+      const key = book.key || null;
+      if (!key || options.has(key)) return;
+      const label = book.title || book.key || key;
+      options.set(key, label);
+    });
+  });
+  return Array.from(options.entries()).map(([key, label]) => ({ key, label }));
+};
+
+const updateBookSelectOptions = () => {
+  const select = document.getElementById('bookSelect');
+  if (!select) return;
+  const books = collectBookOptions().sort((a, b) => a.label.localeCompare(b.label));
+  const optionHtml = ['<option value="manual">Manual entry</option>'];
+  books.forEach((book) => {
+    optionHtml.push(`<option value="${escapeHtml(book.key)}">${escapeHtml(book.label)}</option>`);
+  });
+  select.innerHTML = optionHtml.join('');
+  if (state.evBookSelection !== 'manual' && !books.some((book) => book.key === state.evBookSelection)) {
+    state.evBookSelection = 'manual';
+  }
+  select.value = state.evBookSelection;
+  select.disabled = books.length === 0;
+};
+
+const buildBookPreset = (bookmaker, homeCode, awayCode) => {
+  if (!bookmaker) return null;
+  const preset = getDefaultEvInput();
+  const markets = bookmaker.markets || [];
+
+  const h2h = markets.find((market) => market.key === 'h2h');
+  if (h2h && Array.isArray(h2h.outcomes)) {
+    h2h.outcomes.forEach((outcome) => {
+      const teamCode = canonicalTeamCode(outcome.name);
+      const formatted = formatOddsInput(outcome.price);
+      if (formatted === '') return;
+      if (teamCode === homeCode) preset.moneyline.home = formatted;
+      if (teamCode === awayCode) preset.moneyline.away = formatted;
+    });
+  }
+
+  const spreads = markets.find((market) => market.key === 'spreads');
+  if (spreads && Array.isArray(spreads.outcomes)) {
+    const homeOutcome = spreads.outcomes.find((outcome) => canonicalTeamCode(outcome.name) === homeCode);
+    const awayOutcome = spreads.outcomes.find((outcome) => canonicalTeamCode(outcome.name) === awayCode);
+    if (homeOutcome) {
+      const line = formatLineInput(homeOutcome.point);
+      const odds = formatOddsInput(homeOutcome.price);
+      if (line !== '') preset.spread.home.line = line;
+      if (odds !== '') preset.spread.home.odds = odds;
+    }
+    if (awayOutcome) {
+      const line = formatLineInput(awayOutcome.point);
+      const odds = formatOddsInput(awayOutcome.price);
+      if (line !== '') preset.spread.away.line = line;
+      if (odds !== '') preset.spread.away.odds = odds;
+    }
+  }
+
+  const totals = markets.find((market) => market.key === 'totals');
+  if (totals && Array.isArray(totals.outcomes)) {
+    const overOutcome = totals.outcomes.find((outcome) => String(outcome.name).toLowerCase() === 'over');
+    const underOutcome = totals.outcomes.find((outcome) => String(outcome.name).toLowerCase() === 'under');
+    if (overOutcome) {
+      const line = formatLineInput(overOutcome.point);
+      const odds = formatOddsInput(overOutcome.price);
+      if (line !== '') {
+        preset.total.over.line = line;
+        if (preset.total.under.line === '') preset.total.under.line = line;
+      }
+      if (odds !== '') preset.total.over.odds = odds;
+    }
+    if (underOutcome) {
+      const line = formatLineInput(underOutcome.point);
+      const odds = formatOddsInput(underOutcome.price);
+      if (line !== '') {
+        preset.total.under.line = line;
+        if (preset.total.over.line === '') preset.total.over.line = line;
+      }
+      if (odds !== '') preset.total.under.odds = odds;
+    }
+  }
+
+  const hasValue = (
+    preset.moneyline.home !== ''
+    || preset.moneyline.away !== ''
+    || preset.spread.home.line !== ''
+    || preset.spread.home.odds !== ''
+    || preset.spread.away.line !== ''
+    || preset.spread.away.odds !== ''
+    || preset.total.over.line !== ''
+    || preset.total.over.odds !== ''
+    || preset.total.under.line !== ''
+    || preset.total.under.odds !== ''
+  );
+
+  return hasValue ? preset : null;
+};
+
+const applyBookPreset = (bookKey, options = {}) => {
+  if (!bookKey || bookKey === 'manual') return;
+  if (!state.sportsbookData.length) return;
+  const { onlyEmpty = false } = options;
+  const predictions = state.predictions || [];
+  if (!predictions.length) return;
+
+  const eventMap = new Map();
+  state.sportsbookData.forEach((event) => {
+    const homeCode = canonicalTeamCode(event.home_team);
+    const awayCode = canonicalTeamCode(event.away_team);
+    if (!homeCode || !awayCode) return;
+    eventMap.set(buildPredictionKey(homeCode, awayCode), event);
+  });
+
+  predictions.forEach((prediction) => {
+    const gameKey = buildPredictionKey(prediction.homeTeam, prediction.awayTeam);
+    const event = eventMap.get(gameKey);
+    if (!event) return;
+    const bookmaker = (event.bookmakers || []).find((book) => book.key === bookKey);
+    if (!bookmaker) return;
+    const preset = buildBookPreset(bookmaker, prediction.homeTeam, prediction.awayTeam);
+    if (!preset) return;
+    const target = getEvInput(gameKey);
+    if (!onlyEmpty) {
+      clearEvInput(target);
+    }
+
+    ['home', 'away'].forEach((side) => {
+      const value = preset.moneyline[side];
+      if (value === '') return;
+      if (onlyEmpty && target.moneyline[side] !== '') return;
+      target.moneyline[side] = value;
+    });
+
+    ['home', 'away'].forEach((side) => {
+      ['line', 'odds'].forEach((field) => {
+        const value = preset.spread[side][field];
+        if (value === '') return;
+        if (onlyEmpty && target.spread[side][field] !== '') return;
+        target.spread[side][field] = value;
+      });
+    });
+
+    ['over', 'under'].forEach((side) => {
+      ['line', 'odds'].forEach((field) => {
+        const value = preset.total[side][field];
+        if (value === '') return;
+        if (onlyEmpty && target.total[side][field] !== '') return;
+        target.total[side][field] = value;
+      });
+    });
+  });
 };
 
 const describeAutoMeta = (meta) => {
@@ -1947,6 +2134,9 @@ const runModel = () => {
       }
     });
     state.evInputs = filteredInputs;
+    if (state.evBookSelection !== 'manual') {
+      applyBookPreset(state.evBookSelection, { onlyEmpty: true });
+    }
     state.customBets = state.customBets.filter((bet) => state.predictionMap.has(bet.gameKey));
 
     renderEloSection();
@@ -2062,7 +2252,11 @@ const fetchOddsFromApi = async () => {
     const data = await response.json();
     state.sportsbookData = Array.isArray(data) ? data : [];
     state.consensusMap = buildConsensusMap(state.sportsbookData);
+    updateBookSelectOptions();
     applyConsensusToPredictions();
+    if (state.evBookSelection !== 'manual') {
+      applyBookPreset(state.evBookSelection);
+    }
     state.apiStatus = `Loaded odds for ${state.sportsbookData.length} games.`;
     renderEloSection();
     renderEvCalculator();
@@ -2152,6 +2346,18 @@ const init = () => {
   if (apiKeyInput) {
     apiKeyInput.addEventListener('input', (event) => {
       state.apiKey = event.target.value.trim();
+    });
+  }
+  const bookSelect = document.getElementById('bookSelect');
+  if (bookSelect) {
+    updateBookSelectOptions();
+    bookSelect.addEventListener('change', (event) => {
+      const value = event.target.value;
+      state.evBookSelection = value;
+      if (value !== 'manual') {
+        applyBookPreset(value);
+      }
+      renderEvCalculator();
     });
   }
   document.getElementById('loadOddsBtn')?.addEventListener('click', fetchOddsFromApi);
