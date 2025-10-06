@@ -475,20 +475,34 @@ const parseWeekKey = (key) => {
   return { season, week };
 };
 
-const compareWeeksDesc = (a, b) => {
-  if (a.season !== b.season) return b.season - a.season;
-  return b.week - a.week;
+const compareWeeksChronological = (a, b) => {
+  const timeA = Number.isFinite(a.firstTimestamp) ? a.firstTimestamp : Number.POSITIVE_INFINITY;
+  const timeB = Number.isFinite(b.firstTimestamp) ? b.firstTimestamp : Number.POSITIVE_INFINITY;
+  if (timeA < timeB) return -1;
+  if (timeA > timeB) return 1;
+  if (a.season !== b.season) return a.season - b.season;
+  return a.week - b.week;
 };
 
-const findLatestWeekKey = (predictions) => {
-  let latest = null;
+const findEarliestWeekKey = (predictions) => {
+  let earliest = null;
+  let earliestTime = Number.POSITIVE_INFINITY;
   predictions.forEach((prediction) => {
     if (!Number.isFinite(prediction.season) || !Number.isFinite(prediction.week)) return;
-    if (!latest || prediction.season > latest.season || (prediction.season === latest.season && prediction.week > latest.week)) {
-      latest = { season: prediction.season, week: prediction.week };
+    const timestamp = prediction.date instanceof Date && !Number.isNaN(prediction.date.getTime())
+      ? prediction.date.getTime()
+      : Number.POSITIVE_INFINITY;
+    const isEarlierWeek = !earliest
+      || timestamp < earliestTime
+      || (timestamp === earliestTime
+        && (prediction.season < earliest.season
+          || (prediction.season === earliest.season && prediction.week < earliest.week)));
+    if (isEarlierWeek) {
+      earliest = { season: prediction.season, week: prediction.week };
+      earliestTime = timestamp;
     }
   });
-  return latest ? buildWeekKey(latest.season, latest.week) : null;
+  return earliest ? buildWeekKey(earliest.season, earliest.week) : null;
 };
 
 const formatWeekLabel = (season, week, includeSeason = true) => {
@@ -1040,19 +1054,36 @@ const renderPredictionsTable = (predictions) => {
   predictions.forEach((prediction) => {
     if (!Number.isFinite(prediction.season) || !Number.isFinite(prediction.week)) return;
     const key = buildWeekKey(prediction.season, prediction.week);
-    if (!weekMap.has(key)) {
-      weekMap.set(key, { season: prediction.season, week: prediction.week });
+    const timestamp = prediction.date instanceof Date && !Number.isNaN(prediction.date.getTime())
+      ? prediction.date.getTime()
+      : Number.POSITIVE_INFINITY;
+    const existing = weekMap.get(key);
+    if (existing) {
+      existing.firstTimestamp = Math.min(existing.firstTimestamp, timestamp);
+    } else {
+      weekMap.set(key, {
+        season: prediction.season,
+        week: prediction.week,
+        firstTimestamp: timestamp,
+      });
     }
   });
 
-  const weekOptionsData = Array.from(weekMap.entries()).map(([key, value]) => ({ key, ...value })).sort(compareWeeksDesc);
+  const weekOptionsData = Array.from(weekMap.entries())
+    .map(([key, value]) => ({ key, ...value }))
+    .sort(compareWeeksChronological);
 
   let selectedWeekKey = state.eloWeekFilter;
-  if (selectedWeekKey !== null && selectedWeekKey !== undefined && selectedWeekKey !== '' && !weekMap.has(selectedWeekKey)) {
+  const availableWeekKeys = new Set(weekOptionsData.map((option) => option.key));
+  if (!selectedWeekKey || !availableWeekKeys.has(selectedWeekKey)) {
     selectedWeekKey = weekOptionsData.length ? weekOptionsData[0].key : null;
-    state.eloWeekFilter = selectedWeekKey;
+    if (state.eloWeekFilter !== selectedWeekKey) {
+      state.eloWeekFilter = selectedWeekKey;
+    }
   }
-  const baseWeekFiltered = selectedWeekKey ? predictions.filter((prediction) => buildWeekKey(prediction.season, prediction.week) === selectedWeekKey) : predictions;
+  const baseWeekFiltered = selectedWeekKey
+    ? predictions.filter((prediction) => buildWeekKey(prediction.season, prediction.week) === selectedWeekKey)
+    : predictions;
 
   const gameMap = new Map();
   baseWeekFiltered.forEach((prediction) => {
@@ -1082,13 +1113,12 @@ const renderPredictionsTable = (predictions) => {
     : baseFiltered;
 
   const includeSeasonInLabel = weekOptionsData.length > 1;
-  const weekOptionsHtml = [
-    `<option value=""${selectedWeekKey ? '' : ' selected'}>All Weeks</option>`,
-    ...weekOptionsData.map((option) => {
+  const weekOptionsHtml = weekOptionsData.length
+    ? weekOptionsData.map((option) => {
       const selectedAttr = option.key === selectedWeekKey ? ' selected' : '';
       return `<option value="${escapeHtml(option.key)}"${selectedAttr}>${escapeHtml(formatWeekLabel(option.season, option.week, includeSeasonInLabel))}</option>`;
-    }),
-  ].join('');
+    }).join('')
+    : '<option value="" disabled>No weeks available</option>';
 
   const gameOptionsHtml = [
     `<option value=""${selectedGameKey ? '' : ' selected'}>All Games</option>`,
@@ -1859,7 +1889,8 @@ const attachEloFilters = (root) => {
   if (weekSelect) {
     weekSelect.addEventListener('change', (event) => {
       const value = event.target.value;
-      state.eloWeekFilter = value === '' ? null : value;
+      if (!value) return;
+      state.eloWeekFilter = value;
       state.eloGameFilter = null;
       renderEloSection();
     });
@@ -2114,7 +2145,7 @@ const runModel = () => {
     state.predictions = predictions;
     state.predictionMap = buildPredictionMap(predictions);
     if (state.predictions.length) {
-      state.eloWeekFilter = findLatestWeekKey(state.predictions);
+      state.eloWeekFilter = findEarliestWeekKey(state.predictions);
       state.eloGameFilter = null;
       const firstKey = buildPredictionKey(state.predictions[0].homeTeam, state.predictions[0].awayTeam);
       if (!state.evSelectedGame || !state.predictionMap.has(state.evSelectedGame)) {
