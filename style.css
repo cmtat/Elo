@@ -629,7 +629,8 @@ footer {
 }
 
 .ev-input-wrapper input {
-  flex: 1;
+  flex: 0 0 96px;
+  max-width: 100%;
 }
 
 .ev-sign-toggle {
