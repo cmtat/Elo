@@ -398,6 +398,20 @@ footer {
   cursor: not-allowed;
 }
 
+.best-ev-controls {
+  align-items: center;
+  gap: 16px;
+}
+
+.best-ev-book {
+  font-size: 0.95rem;
+  color: var(--subtle);
+}
+
+.best-ev-book strong {
+  color: var(--accent);
+}
+
 .ev-controls {
   display: flex;
   flex-wrap: wrap;

@@ -33,6 +33,7 @@ const state = {
   evSelectedGame: null,
   evWeekFilter: null,
   evBookSelection: 'manual',
+  bestEvWeekFilter: null,
   eloWeekFilter: null,
   eloGameFilter: null,
   customBets: [],
@@ -505,6 +506,31 @@ const findEarliestWeekKey = (predictions) => {
   return earliest ? buildWeekKey(earliest.season, earliest.week) : null;
 };
 
+const buildWeekSummaries = (predictions) => {
+  const weekMap = new Map();
+  predictions.forEach((prediction) => {
+    if (!Number.isFinite(prediction.season) || !Number.isFinite(prediction.week)) return;
+    const key = buildWeekKey(prediction.season, prediction.week);
+    const timestamp = prediction.date instanceof Date && !Number.isNaN(prediction.date.getTime())
+      ? prediction.date.getTime()
+      : Number.POSITIVE_INFINITY;
+    const existing = weekMap.get(key);
+    if (existing) {
+      existing.firstTimestamp = Math.min(existing.firstTimestamp, timestamp);
+    } else {
+      weekMap.set(key, {
+        season: prediction.season,
+        week: prediction.week,
+        firstTimestamp: timestamp,
+      });
+    }
+  });
+  const weekSummaries = Array.from(weekMap.entries())
+    .map(([key, value]) => ({ key, ...value }))
+    .sort(compareWeeksChronological);
+  return { weekMap, weekSummaries };
+};
+
 const formatWeekLabel = (season, week, includeSeason = true) => {
   if (!Number.isFinite(season) || !Number.isFinite(week)) return 'Unknown Week';
   return includeSeason ? `Season ${season} · Week ${week}` : `Week ${week}`;
@@ -791,6 +817,13 @@ const collectBookOptions = () => {
   return Array.from(options.entries()).map(([key, label]) => ({ key, label }));
 };
 
+const getSelectedBookLabel = (bookKey) => {
+  if (!bookKey || bookKey === 'manual') return null;
+  const books = collectBookOptions();
+  const entry = books.find((book) => book.key === bookKey);
+  return entry ? entry.label : bookKey;
+};
+
 const updateBookSelectOptions = () => {
   const select = document.getElementById('bookSelect');
   if (!select) return;
@@ -1050,28 +1083,7 @@ const renderPredictionsTable = (predictions) => {
     return '<p class="hint">Load upcoming games (CSV or auto-fetch) before running the model.</p>';
   }
 
-  const weekMap = new Map();
-  predictions.forEach((prediction) => {
-    if (!Number.isFinite(prediction.season) || !Number.isFinite(prediction.week)) return;
-    const key = buildWeekKey(prediction.season, prediction.week);
-    const timestamp = prediction.date instanceof Date && !Number.isNaN(prediction.date.getTime())
-      ? prediction.date.getTime()
-      : Number.POSITIVE_INFINITY;
-    const existing = weekMap.get(key);
-    if (existing) {
-      existing.firstTimestamp = Math.min(existing.firstTimestamp, timestamp);
-    } else {
-      weekMap.set(key, {
-        season: prediction.season,
-        week: prediction.week,
-        firstTimestamp: timestamp,
-      });
-    }
-  });
-
-  const weekOptionsData = Array.from(weekMap.entries())
-    .map(([key, value]) => ({ key, ...value }))
-    .sort(compareWeeksChronological);
+  const { weekMap, weekSummaries: weekOptionsData } = buildWeekSummaries(predictions);
 
   let selectedWeekKey = state.eloWeekFilter;
   const availableWeekKeys = new Set(weekOptionsData.map((option) => option.key));
@@ -1289,6 +1301,76 @@ const createSpreadMetrics = (prediction, consensus, inputs, side) => {
     bestBook: consensusEntry ? sampleSizeLabel(consensusEntry.sampleSize) : null,
     modelEdgePoints: validLine === null ? null : (side === 'home' ? prediction.modelSpread - validLine : validLine + prediction.modelSpread),
   };
+};
+
+const collectBestEvBets = (predictions) => {
+  const bets = [];
+  const computeEdge = (metrics) => {
+    if (metrics.modelProb === null || metrics.implied === null) return null;
+    return metrics.modelProb - metrics.implied;
+  };
+
+  predictions.forEach((prediction) => {
+    const gameKey = buildPredictionKey(prediction.homeTeam, prediction.awayTeam);
+    const evInput = state.evInputs[gameKey];
+    if (!evInput) return;
+    const consensus = state.consensusMap.get(gameKey) || null;
+    const matchup = `${prediction.awayTeam} @ ${prediction.homeTeam}`;
+
+    const moneylineSides = ['home', 'away'];
+    moneylineSides.forEach((side) => {
+      const metrics = createMoneylineMetrics(prediction, consensus, evInput, side);
+      if (metrics.odds === null || metrics.modelEv === null || metrics.modelEv <= 0) return;
+      if (metrics.modelProb === null || metrics.implied === null) return;
+      const team = side === 'home' ? prediction.homeTeam : prediction.awayTeam;
+      bets.push({
+        key: `${gameKey}|moneyline|${side}`,
+        type: 'moneyline',
+        matchup,
+        label: `${team} ML`,
+        odds: metrics.odds,
+        modelProb: metrics.modelProb,
+        impliedProb: metrics.implied,
+        modelEdge: computeEdge(metrics),
+        modelEv: metrics.modelEv,
+        consensusEv: metrics.consensusEv,
+      });
+    });
+
+    const spreadSides = ['home', 'away'];
+    spreadSides.forEach((side) => {
+      const metrics = createSpreadMetrics(prediction, consensus, evInput, side);
+      if (metrics.line === null || metrics.odds === null || metrics.modelEv === null || metrics.modelEv <= 0) return;
+      if (metrics.modelProb === null || metrics.implied === null) return;
+      const team = side === 'home' ? prediction.homeTeam : prediction.awayTeam;
+      const lineDisplay = formatSpreadLine(metrics.line);
+      bets.push({
+        key: `${gameKey}|spread|${side}`,
+        type: 'spread',
+        matchup,
+        label: `${team} ${lineDisplay} (Spread)`,
+        odds: metrics.odds,
+        modelProb: metrics.modelProb,
+        impliedProb: metrics.implied,
+        modelEdge: computeEdge(metrics),
+        modelEv: metrics.modelEv,
+        consensusEv: metrics.consensusEv,
+      });
+    });
+  });
+
+  bets.sort((a, b) => {
+    const evA = typeof a.modelEv === 'number' ? a.modelEv : Number.NEGATIVE_INFINITY;
+    const evB = typeof b.modelEv === 'number' ? b.modelEv : Number.NEGATIVE_INFINITY;
+    if (evA === evB) {
+      const edgeA = typeof a.modelEdge === 'number' ? a.modelEdge : Number.NEGATIVE_INFINITY;
+      const edgeB = typeof b.modelEdge === 'number' ? b.modelEdge : Number.NEGATIVE_INFINITY;
+      return edgeB - edgeA;
+    }
+    return evB - evA;
+  });
+
+  return bets;
 };
 
 const getTotalEntry = (consensus, line, side) => {
@@ -1750,6 +1832,110 @@ const renderEvCalculator = (focusInfo) => {
   attachEvInputs(focusInfo);
 };
 
+const renderBestEvTab = () => {
+  const container = document.getElementById('bestEvContent');
+  if (!container) return;
+
+  if (!state.predictions || !state.predictions.length) {
+    container.innerHTML = '<p class="hint">Run the Elo model to populate upcoming games.</p>';
+    return;
+  }
+
+  if (!state.sportsbookData.length) {
+    container.innerHTML = '<p class="hint">Load sportsbook odds in the EV Calculator tab to evaluate best bets.</p>';
+    return;
+  }
+
+  if (!state.evBookSelection || state.evBookSelection === 'manual') {
+    container.innerHTML = '<p class="hint">Select a sportsbook from the EV Calculator tab to use its prices.</p>';
+    return;
+  }
+
+  const { weekSummaries } = buildWeekSummaries(state.predictions);
+  if (!weekSummaries.length) {
+    container.innerHTML = '<p class="hint">No upcoming games were found after running the model.</p>';
+    return;
+  }
+
+  const availableWeekKeys = new Set(weekSummaries.map((entry) => entry.key));
+  let selectedWeekKey = state.bestEvWeekFilter;
+  if (!selectedWeekKey || !availableWeekKeys.has(selectedWeekKey)) {
+    selectedWeekKey = weekSummaries[0].key;
+    state.bestEvWeekFilter = selectedWeekKey;
+  }
+
+  const filteredPredictions = state.predictions.filter((prediction) => buildWeekKey(prediction.season, prediction.week) === selectedWeekKey);
+  const bets = collectBestEvBets(filteredPredictions);
+  const includeSeason = weekSummaries.length > 1;
+  const weekOptionsHtml = weekSummaries.map((option) => {
+    const selectedAttr = option.key === selectedWeekKey ? ' selected' : '';
+    return `<option value="${escapeHtml(option.key)}"${selectedAttr}>${escapeHtml(formatWeekLabel(option.season, option.week, includeSeason))}</option>`;
+  }).join('');
+
+  const bookLabel = getSelectedBookLabel(state.evBookSelection) || state.evBookSelection;
+  const controlsHtml = `
+    <div class="ev-controls best-ev-controls">
+      <label for="bestEvWeekSelect" class="ev-select-label">Week</label>
+      <select id="bestEvWeekSelect">${weekOptionsHtml}</select>
+      <span class="best-ev-book">Using <strong>${escapeHtml(bookLabel || 'Selected book')}</strong></span>
+    </div>
+  `;
+
+  if (!bets.length) {
+    container.innerHTML = `${controlsHtml}<p class="hint">No positive expected value bets found for this week with the selected book.</p>`;
+    attachBestEvControls();
+    return;
+  }
+
+  const rows = bets.map((bet) => {
+    const modelProb = formatPercent(bet.modelProb);
+    const impliedProb = formatPercent(bet.impliedProb);
+    const modelEdge = formatSignedPercent(bet.modelEdge);
+    return `
+      <tr>
+        <td>${escapeHtml(bet.matchup)}</td>
+        <td>${escapeHtml(bet.label)}</td>
+        <td>${formatMoneyline(bet.odds)}</td>
+        <td>${modelProb}</td>
+        <td>${impliedProb}</td>
+        <td>${modelEdge}</td>
+        <td>${formatEv(bet.modelEv)}</td>
+        <td>${formatEv(bet.consensusEv)}</td>
+      </tr>
+    `;
+  }).join('');
+
+  container.innerHTML = `${controlsHtml}
+    <table class="data-table best-ev-table">
+      <thead>
+        <tr>
+          <th>Game</th>
+          <th>Bet</th>
+          <th>Odds</th>
+          <th>Model Win %</th>
+          <th>Implied Win %</th>
+          <th>Model Edge</th>
+          <th>Model EV</th>
+          <th>Market EV</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+  attachBestEvControls();
+};
+
+const attachBestEvControls = () => {
+  const weekSelect = document.getElementById('bestEvWeekSelect');
+  if (weekSelect) {
+    weekSelect.addEventListener('change', (event) => {
+      const value = event.target.value;
+      if (!value) return;
+      state.bestEvWeekFilter = value;
+      renderBestEvTab();
+    });
+  }
+};
+
 const renderCustomSection = () => {
   const select = document.getElementById('customGameSelect');
   if (select) {
@@ -2146,6 +2332,7 @@ const runModel = () => {
     state.predictionMap = buildPredictionMap(predictions);
     if (state.predictions.length) {
       state.eloWeekFilter = findEarliestWeekKey(state.predictions);
+      state.bestEvWeekFilter = state.eloWeekFilter;
       state.eloGameFilter = null;
       const firstKey = buildPredictionKey(state.predictions[0].homeTeam, state.predictions[0].awayTeam);
       if (!state.evSelectedGame || !state.predictionMap.has(state.evSelectedGame)) {
@@ -2155,6 +2342,7 @@ const runModel = () => {
       state.evSelectedGame = null;
       state.eloWeekFilter = null;
       state.eloGameFilter = null;
+      state.bestEvWeekFilter = null;
     }
     applyConsensusToPredictions();
 
@@ -2173,6 +2361,7 @@ const runModel = () => {
     renderEloSection();
     renderEvCalculator();
     renderCustomSection();
+    renderBestEvTab();
   } catch (err) {
     console.error(err);
     if (outputs) outputs.innerHTML = `<p class="error">Error running model: ${err.message}</p>`;
@@ -2292,6 +2481,7 @@ const fetchOddsFromApi = async () => {
     renderEloSection();
     renderEvCalculator();
     renderCustomSection();
+    renderBestEvTab();
   } catch (err) {
     console.error(err);
     state.apiStatus = `Failed to load odds: ${err.message}`;
@@ -2389,6 +2579,7 @@ const init = () => {
         applyBookPreset(value);
       }
       renderEvCalculator();
+      renderBestEvTab();
     });
   }
   document.getElementById('loadOddsBtn')?.addEventListener('click', fetchOddsFromApi);
@@ -2397,6 +2588,7 @@ const init = () => {
   updateCustomForm();
   setAutoStatus('Awaiting auto fetch (optional).', 'status');
   renderApiStatus();
+  renderBestEvTab();
 };
 
 document.addEventListener('DOMContentLoaded', init);

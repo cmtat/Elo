@@ -16,6 +16,7 @@
   <nav class="tab-nav">
     <button class="tab-button active" data-tab="elo">Elo Model Ratings</button>
     <button class="tab-button" data-tab="ev">EV Calculator</button>
+    <button class="tab-button" data-tab="bestEv">Best EV Bets</button>
     <button class="tab-button" data-tab="custom">Custom Bet Comparison</button>
   </nav>
 
@@ -82,6 +83,16 @@
       </section>
       <section class="panel" id="evContent">
         <p class="hint">Run the Elo model and load sportsbook lines to view expected value by game.</p>
+      </section>
+    </section>
+
+    <section id="tab-bestEv" class="tab-section">
+      <section class="panel">
+        <h2>Best EV Bets</h2>
+        <p class="hint">Run the model, load sportsbook lines, and choose a book to see positive expected value wagers for the selected week.</p>
+      </section>
+      <section class="panel" id="bestEvContent">
+        <p class="hint">Select a sportsbook in the EV Calculator tab to populate this view.</p>
       </section>
     </section>
 
