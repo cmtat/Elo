@@ -476,6 +476,28 @@ const trackClvForInput = (gameKey, evType, side) => {
   }
 };
 
+const refreshClvSnapshotsForAllInputs = () => {
+  if (!state || !state.evInputs) return;
+  Object.entries(state.evInputs).forEach(([gameKey, inputs]) => {
+    if (!inputs) return;
+    ['home', 'away'].forEach((side) => {
+      if (inputs.moneyline && inputs.moneyline[side] !== '') {
+        trackClvForInput(gameKey, 'moneyline', side);
+      }
+      const spreadInputs = inputs.spread ? inputs.spread[side] : null;
+      if (spreadInputs && spreadInputs.line !== '' && spreadInputs.odds !== '') {
+        trackClvForInput(gameKey, 'spread', side);
+      }
+    });
+    ['over', 'under'].forEach((side) => {
+      const totalInputs = inputs.total ? inputs.total[side] : null;
+      if (totalInputs && totalInputs.line !== '' && totalInputs.odds !== '') {
+        trackClvForInput(gameKey, 'total', side);
+      }
+    });
+  });
+};
+
 const ensureTeamState = (teamStates, team, season) => {
   let state = teamStates.get(team);
   if (!state) {
@@ -679,40 +701,80 @@ const normalizePoint = (point) => {
 
 const createConsensusBucket = () => ({ values: [], consensus: null });
 
-const addOddsSample = (bucket, outcome, bookTitle) => {
+const addOddsSample = (bucket, outcome, bookTitle, bookKey) => {
   const odds = toNumber(outcome.price);
   if (odds === null) return;
-  bucket.values.push({ odds, book: bookTitle || null });
+  const identifier = bookKey || bookTitle || null;
+  bucket.values.push({
+    odds,
+    book: bookTitle || null,
+    key: identifier,
+  });
 };
 
-const computeAverageOdds = (bucket) => {
-  if (!bucket.values.length) return null;
-  const total = bucket.values.reduce((sum, item) => sum + item.odds, 0);
-  return {
-    odds: total / bucket.values.length,
-    sampleSize: bucket.values.length,
+const applyNoVigConsensus = (bucketA, bucketB) => {
+  if (!bucketA || !bucketB) return;
+  const pairMap = new Map();
+
+  const attach = (bucket, field) => {
+    if (!bucket || !Array.isArray(bucket.values)) return;
+    bucket.values.forEach((sample, index) => {
+      if (!sample || !Number.isFinite(sample.odds)) return;
+      const key = sample.key || sample.book || `book-${field}-${index}`;
+      const existing = pairMap.get(key) || { book: sample.book || null };
+      existing[field] = sample.odds;
+      pairMap.set(key, existing);
+    });
+  };
+
+  attach(bucketA, 'aOdds');
+  attach(bucketB, 'bOdds');
+
+  let count = 0;
+  let oddsSumA = 0;
+  let oddsSumB = 0;
+  let probSumA = 0;
+  let probSumB = 0;
+
+  pairMap.forEach((entry) => {
+    if (!Number.isFinite(entry.aOdds) || !Number.isFinite(entry.bOdds)) return;
+    const impliedA = oddsToProb(entry.aOdds);
+    const impliedB = oddsToProb(entry.bOdds);
+    if (impliedA === null || impliedB === null) return;
+    const total = impliedA + impliedB;
+    if (!(total > 0)) return;
+    probSumA += impliedA / total;
+    probSumB += impliedB / total;
+    oddsSumA += entry.aOdds;
+    oddsSumB += entry.bOdds;
+    count += 1;
+  });
+
+  if (!count) return;
+
+  const avgProbA = probSumA / count;
+  const avgProbB = probSumB / count;
+  const normTotal = avgProbA + avgProbB;
+  const normalizedA = normTotal > 0 ? avgProbA / normTotal : null;
+  const normalizedB = normTotal > 0 ? avgProbB / normTotal : null;
+
+  if (normalizedA === null || normalizedB === null) return;
+
+  bucketA.consensus = {
+    odds: oddsSumA / count,
+    prob: normalizedA,
+    sampleSize: count,
+  };
+  bucketB.consensus = {
+    odds: oddsSumB / count,
+    prob: normalizedB,
+    sampleSize: count,
   };
 };
 
 const finalizePairProbabilities = (entry) => {
-  const homeSummary = computeAverageOdds(entry.home);
-  const awaySummary = computeAverageOdds(entry.away);
-  if (!homeSummary || !awaySummary) return;
-  const impliedHome = oddsToProb(homeSummary.odds);
-  const impliedAway = oddsToProb(awaySummary.odds);
-  if (impliedHome === null || impliedAway === null) return;
-  const total = impliedHome + impliedAway;
-  if (total <= 0) return;
-  entry.home.consensus = {
-    odds: homeSummary.odds,
-    prob: impliedHome / total,
-    sampleSize: homeSummary.sampleSize,
-  };
-  entry.away.consensus = {
-    odds: awaySummary.odds,
-    prob: impliedAway / total,
-    sampleSize: awaySummary.sampleSize,
-  };
+  if (!entry) return;
+  applyNoVigConsensus(entry.home, entry.away);
 };
 
 const buildConsensusMap = (oddsData) => {
@@ -745,9 +807,9 @@ const buildConsensusMap = (oddsData) => {
         h2h.outcomes.forEach((outcome) => {
           const teamCode = canonicalTeamCode(outcome.name);
           if (teamCode === homeCode) {
-            addOddsSample(consensus.moneyline.home, outcome, title);
+            addOddsSample(consensus.moneyline.home, outcome, title, book.key);
           } else if (teamCode === awayCode) {
-            addOddsSample(consensus.moneyline.away, outcome, title);
+            addOddsSample(consensus.moneyline.away, outcome, title, book.key);
           }
         });
       }
@@ -765,8 +827,8 @@ const buildConsensusMap = (oddsData) => {
               home: createConsensusBucket(),
               away: createConsensusBucket(),
             };
-            addOddsSample(entry.home, homeOutcome, title);
-            addOddsSample(entry.away, awayOutcome, title);
+            addOddsSample(entry.home, homeOutcome, title, book.key);
+            addOddsSample(entry.away, awayOutcome, title, book.key);
             consensus.spreads.set(pointKey, entry);
           }
         }
@@ -784,8 +846,8 @@ const buildConsensusMap = (oddsData) => {
               over: createConsensusBucket(),
               under: createConsensusBucket(),
             };
-            addOddsSample(entry.over, overOutcome, title);
-            addOddsSample(entry.under, underOutcome, title);
+            addOddsSample(entry.over, overOutcome, title, book.key);
+            addOddsSample(entry.under, underOutcome, title, book.key);
             consensus.totals.set(pointKey, entry);
           }
         }
@@ -793,47 +855,12 @@ const buildConsensusMap = (oddsData) => {
     });
 
     if (consensus.moneyline.home.values.length && consensus.moneyline.away.values.length) {
-      const homeSummary = computeAverageOdds(consensus.moneyline.home);
-      const awaySummary = computeAverageOdds(consensus.moneyline.away);
-      if (homeSummary && awaySummary) {
-        const impliedHome = oddsToProb(homeSummary.odds);
-        const impliedAway = oddsToProb(awaySummary.odds);
-        if (impliedHome !== null && impliedAway !== null && impliedHome + impliedAway > 0) {
-          const total = impliedHome + impliedAway;
-          consensus.moneyline.home.consensus = {
-            odds: homeSummary.odds,
-            prob: impliedHome / total,
-            sampleSize: homeSummary.sampleSize,
-          };
-          consensus.moneyline.away.consensus = {
-            odds: awaySummary.odds,
-            prob: impliedAway / total,
-            sampleSize: awaySummary.sampleSize,
-          };
-        }
-      }
+      applyNoVigConsensus(consensus.moneyline.home, consensus.moneyline.away);
     }
 
     consensus.spreads.forEach((entry) => finalizePairProbabilities(entry));
     consensus.totals.forEach((entry) => {
-      const overSummary = computeAverageOdds(entry.over);
-      const underSummary = computeAverageOdds(entry.under);
-      if (!overSummary || !underSummary) return;
-      const impliedOver = oddsToProb(overSummary.odds);
-      const impliedUnder = oddsToProb(underSummary.odds);
-      if (impliedOver !== null && impliedUnder !== null && impliedOver + impliedUnder > 0) {
-        const total = impliedOver + impliedUnder;
-        entry.over.consensus = {
-          odds: overSummary.odds,
-          prob: impliedOver / total,
-          sampleSize: overSummary.sampleSize,
-        };
-        entry.under.consensus = {
-          odds: underSummary.odds,
-          prob: impliedUnder / total,
-          sampleSize: underSummary.sampleSize,
-        };
-      }
+      applyNoVigConsensus(entry.over, entry.under);
     });
 
     map.set(key, consensus);
@@ -1102,6 +1129,8 @@ const applyBookPreset = (bookKey, options = {}) => {
       });
     });
   });
+
+  refreshClvSnapshotsForAllInputs();
 };
 
 const describeAutoMeta = (meta) => {
@@ -2605,6 +2634,7 @@ const runModel = () => {
       }
     });
     state.evInputs = filteredInputs;
+    refreshClvSnapshotsForAllInputs();
     if (state.evBookSelection !== 'manual') {
       applyBookPreset(state.evBookSelection, { onlyEmpty: true });
     }
@@ -2724,6 +2754,7 @@ const fetchOddsFromApi = async () => {
     const data = await response.json();
     state.sportsbookData = Array.isArray(data) ? data : [];
     state.consensusMap = buildConsensusMap(state.sportsbookData);
+    refreshClvSnapshotsForAllInputs();
     updateBookSelectOptions();
     applyConsensusToPredictions();
     if (state.evBookSelection !== 'manual') {
