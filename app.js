@@ -37,6 +37,8 @@ const state = {
   eloWeekFilter: null,
   eloGameFilter: null,
   customBets: [],
+  clvHistory: [],
+  clvLatest: new Map(),
   apiKey: '',
   apiLoading: false,
   apiStatus: null,
@@ -339,6 +341,139 @@ const expectedValue = (probWin, odds) => {
   if (decimal === null || probWin === null || probWin === undefined) return null;
   const profit = decimal - 1;
   return probWin * profit - (1 - probWin);
+};
+
+const ensureClvTracking = () => {
+  if (!(state.clvLatest instanceof Map)) {
+    state.clvLatest = new Map();
+  }
+  if (!Array.isArray(state.clvHistory)) {
+    state.clvHistory = [];
+  }
+};
+
+const buildClvKey = (gameKey, market, side) => `${gameKey}|${market}|${side}`;
+
+const recordClvSnapshot = ({
+  gameKey,
+  market,
+  side,
+  userOdds,
+  userLine,
+  consensusOdds,
+  consensusLine,
+  consensusProb,
+  impliedProb,
+}) => {
+  ensureClvTracking();
+  const oddsValid = Number.isFinite(userOdds);
+  const consensusOddsValid = Number.isFinite(consensusOdds);
+  if (!oddsValid || !consensusOddsValid) return;
+  const isPointMarket = market !== 'moneyline';
+  if (isPointMarket) {
+    if (!Number.isFinite(userLine) || !Number.isFinite(consensusLine)) return;
+  }
+  if (consensusProb === null || Number.isNaN(consensusProb)) return;
+  const key = buildClvKey(gameKey, market, side);
+  const snapshot = {
+    timestamp: new Date().toISOString(),
+    gameKey,
+    market,
+    side,
+    userOdds,
+    userLine: Number.isFinite(userLine) ? userLine : null,
+    consensusOdds,
+    consensusLine: Number.isFinite(consensusLine) ? consensusLine : null,
+    consensusProb,
+    impliedProb: impliedProb ?? null,
+    edgeProb: consensusProb !== null && impliedProb !== null ? consensusProb - impliedProb : null,
+    fairOdds: consensusProb === null ? null : probToMoneyline(consensusProb),
+    oddsDiff: Number.isFinite(consensusOdds) ? userOdds - consensusOdds : null,
+    lineDiff: isPointMarket && Number.isFinite(userLine) && Number.isFinite(consensusLine)
+      ? userLine - consensusLine
+      : null,
+  };
+  const last = state.clvLatest.get(key);
+  if (
+    last
+    && last.userOdds === snapshot.userOdds
+    && last.userLine === snapshot.userLine
+    && last.consensusOdds === snapshot.consensusOdds
+    && last.consensusLine === snapshot.consensusLine
+  ) {
+    return;
+  }
+  state.clvLatest.set(key, {
+    userOdds: snapshot.userOdds,
+    userLine: snapshot.userLine,
+    consensusOdds: snapshot.consensusOdds,
+    consensusLine: snapshot.consensusLine,
+  });
+  state.clvHistory.push(snapshot);
+};
+
+const trackClvForInput = (gameKey, evType, side) => {
+  const consensus = state.consensusMap.get(gameKey);
+  const inputs = state.evInputs[gameKey];
+  if (!consensus || !inputs) return;
+
+  if (evType === 'moneyline') {
+    const userOdds = toNumber(inputs.moneyline[side]);
+    if (userOdds === null) return;
+    const marketNode = getConsensusMoneyline(consensus, side);
+    if (!marketNode) return;
+    recordClvSnapshot({
+      gameKey,
+      market: 'moneyline',
+      side,
+      userOdds,
+      userLine: null,
+      consensusOdds: marketNode.odds ?? null,
+      consensusLine: null,
+      consensusProb: marketNode.prob ?? null,
+      impliedProb: oddsToProb(userOdds),
+    });
+    return;
+  }
+
+  if (evType === 'spread') {
+    const userOdds = toNumber(inputs.spread[side].odds);
+    const userLine = toNumber(inputs.spread[side].line);
+    if (userOdds === null || userLine === null) return;
+    const marketEntry = getSpreadEntry(consensus, userLine, side);
+    if (!marketEntry) return;
+    recordClvSnapshot({
+      gameKey,
+      market: 'spread',
+      side,
+      userOdds,
+      userLine,
+      consensusOdds: marketEntry.odds ?? null,
+      consensusLine: marketEntry.line ?? null,
+      consensusProb: marketEntry.prob ?? null,
+      impliedProb: oddsToProb(userOdds),
+    });
+    return;
+  }
+
+  if (evType === 'total') {
+    const userOdds = toNumber(inputs.total[side].odds);
+    const userLine = toNumber(inputs.total[side].line);
+    if (userOdds === null || userLine === null) return;
+    const marketEntry = getTotalEntry(consensus, userLine, side);
+    if (!marketEntry) return;
+    recordClvSnapshot({
+      gameKey,
+      market: 'total',
+      side,
+      userOdds,
+      userLine,
+      consensusOdds: marketEntry.odds ?? null,
+      consensusLine: marketEntry.line ?? null,
+      consensusProb: marketEntry.prob ?? null,
+      impliedProb: oddsToProb(userOdds),
+    });
+  }
 };
 
 const ensureTeamState = (teamStates, team, season) => {
@@ -1246,33 +1381,71 @@ const createMoneylineMetrics = (prediction, consensus, inputs, side) => {
   const consensusOdds = consensusPoint?.odds ?? null;
   const implied = validOdds === null ? null : oddsToProb(validOdds);
   const probabilityEdge = implied === null || consensusProb === null ? null : consensusProb - implied;
+  const marketEv = validOdds === null || consensusProb === null ? null : expectedValue(consensusProb, validOdds);
+  const fairOdds = consensusProb === null ? null : probToMoneyline(consensusProb);
   return {
     odds: validOdds,
     implied,
     consensusProb,
     probabilityEdge,
-    consensusEv: validOdds === null || consensusProb === null ? null : expectedValue(consensusProb, validOdds),
-    bestOdds: consensusOdds,
+    marketEv,
+    consensusOdds,
+    fairOdds,
+    consensusLine: null,
     bestBook: consensusPoint?.label || null,
     sampleSize: consensusPoint?.sampleSize ?? null,
   };
 };
 
 const getSpreadEntry = (consensus, line, side) => {
-  if (!consensus || !consensus.spreads || line === null || line === '') return null;
-  const adjustedLine = side === 'home' ? line : -line;
-  const pointKey = normalizePoint(adjustedLine);
-  if (pointKey === null) return null;
-  const entry = consensus.spreads.get(pointKey);
-  if (!entry) return null;
-  const bucket = side === 'home' ? entry.home : entry.away;
-  if (!bucket || !bucket.consensus) return null;
-  return {
-    odds: bucket.consensus.odds,
-    prob: bucket.consensus.prob,
-    sampleSize: bucket.consensus.sampleSize,
-    line: side === 'home' ? entry.pointHome : entry.pointAway,
-  };
+  if (!consensus || !consensus.spreads || !consensus.spreads.size) return null;
+  const targetLine = Number.isFinite(line) ? Number(line) : null;
+  const tolerance = 0.05;
+  let best = null;
+  let bestMeta = null;
+  consensus.spreads.forEach((entry) => {
+    const bucket = side === 'home' ? entry.home : entry.away;
+    if (!bucket || !bucket.consensus) return;
+    const consensusLine = side === 'home' ? entry.pointHome : entry.pointAway;
+    const diff = targetLine === null ? 0 : Math.abs(consensusLine - targetLine);
+    const isExact = targetLine !== null && diff <= tolerance;
+    const sampleSize = bucket.consensus.sampleSize || 0;
+    const metadata = { diff, isExact, sampleSize };
+    if (!best) {
+      best = {
+        line: consensusLine,
+        odds: bucket.consensus.odds,
+        prob: bucket.consensus.prob,
+        sampleSize,
+      };
+      bestMeta = metadata;
+      return;
+    }
+    let replace = false;
+    if (metadata.isExact && !bestMeta.isExact) {
+      replace = true;
+    } else if (metadata.isExact === bestMeta.isExact) {
+      if (targetLine !== null) {
+        if (metadata.diff < bestMeta.diff - 1e-6) {
+          replace = true;
+        } else if (Math.abs(metadata.diff - bestMeta.diff) <= 1e-6 && metadata.sampleSize > bestMeta.sampleSize) {
+          replace = true;
+        }
+      } else if (metadata.sampleSize > bestMeta.sampleSize) {
+        replace = true;
+      }
+    }
+    if (replace) {
+      best = {
+        line: consensusLine,
+        odds: bucket.consensus.odds,
+        prob: bucket.consensus.prob,
+        sampleSize,
+      };
+      bestMeta = metadata;
+    }
+  });
+  return best;
 };
 
 const createSpreadMetrics = (prediction, consensus, inputs, side) => {
@@ -1287,14 +1460,18 @@ const createSpreadMetrics = (prediction, consensus, inputs, side) => {
   const consensusProb = consensusEntry?.prob ?? null;
   const implied = validOdds === null ? null : oddsToProb(validOdds);
   const probabilityEdge = implied === null || consensusProb === null ? null : consensusProb - implied;
+  const marketEv = validOdds === null || consensusProb === null ? null : expectedValue(consensusProb, validOdds);
+  const fairOdds = consensusProb === null ? null : probToMoneyline(consensusProb);
   return {
     line: validLine,
     odds: validOdds,
     implied,
     consensusProb,
     probabilityEdge,
-    consensusEv: validOdds === null || consensusProb === null ? null : expectedValue(consensusProb, validOdds),
-    bestOdds: consensusEntry?.odds ?? null,
+    marketEv,
+    fairOdds,
+    consensusOdds: consensusEntry?.odds ?? null,
+    consensusLine: consensusEntry?.line ?? null,
     bestBook: consensusEntry ? sampleSizeLabel(consensusEntry.sampleSize) : null,
   };
 };
@@ -1310,10 +1487,9 @@ const collectBestEvBets = (predictions) => {
     const consensus = state.consensusMap.get(gameKey) || null;
     const matchup = `${prediction.awayTeam} @ ${prediction.homeTeam}`;
 
-    const moneylineSides = ['home', 'away'];
-    moneylineSides.forEach((side) => {
+    ['home', 'away'].forEach((side) => {
       const metrics = createMoneylineMetrics(prediction, consensus, evInput, side);
-      if (metrics.odds === null || metrics.consensusEv === null || metrics.consensusEv <= 0) return;
+      if (metrics.odds === null || metrics.marketEv === null || metrics.marketEv <= 0) return;
       if (metrics.consensusProb === null || metrics.implied === null) return;
       if (metrics.probabilityEdge === null || metrics.probabilityEdge <= 0) return;
       const team = side === 'home' ? prediction.homeTeam : prediction.awayTeam;
@@ -1323,17 +1499,20 @@ const collectBestEvBets = (predictions) => {
         matchup,
         label: `${team} ML`,
         odds: metrics.odds,
+        marketOdds: metrics.consensusOdds ?? null,
+        fairOdds: metrics.fairOdds ?? null,
+        marketLine: null,
+        userLine: null,
         consensusProb: metrics.consensusProb,
         impliedProb: metrics.implied,
         probabilityEdge: computeEdge(metrics),
-        consensusEv: metrics.consensusEv,
+        marketEv: metrics.marketEv,
       });
     });
 
-    const spreadSides = ['home', 'away'];
-    spreadSides.forEach((side) => {
+    ['home', 'away'].forEach((side) => {
       const metrics = createSpreadMetrics(prediction, consensus, evInput, side);
-      if (metrics.line === null || metrics.odds === null || metrics.consensusEv === null || metrics.consensusEv <= 0) return;
+      if (metrics.line === null || metrics.odds === null || metrics.marketEv === null || metrics.marketEv <= 0) return;
       if (metrics.consensusProb === null || metrics.implied === null) return;
       if (metrics.probabilityEdge === null || metrics.probabilityEdge <= 0) return;
       const team = side === 'home' ? prediction.homeTeam : prediction.awayTeam;
@@ -1344,17 +1523,44 @@ const collectBestEvBets = (predictions) => {
         matchup,
         label: `${team} ${lineDisplay} (Spread)`,
         odds: metrics.odds,
+        marketOdds: metrics.consensusOdds ?? null,
+        fairOdds: metrics.fairOdds ?? null,
+        marketLine: metrics.consensusLine ?? null,
+        userLine: metrics.line,
         consensusProb: metrics.consensusProb,
         impliedProb: metrics.implied,
         probabilityEdge: computeEdge(metrics),
-        consensusEv: metrics.consensusEv,
+        marketEv: metrics.marketEv,
+      });
+    });
+
+    ['over', 'under'].forEach((side) => {
+      const metrics = createTotalMetrics(consensus, evInput, side);
+      if (metrics.line === null || metrics.odds === null || metrics.marketEv === null || metrics.marketEv <= 0) return;
+      if (metrics.consensusProb === null || metrics.implied === null) return;
+      if (metrics.probabilityEdge === null || metrics.probabilityEdge <= 0) return;
+      const labelPrefix = side === 'over' ? 'Over' : 'Under';
+      bets.push({
+        key: `${gameKey}|total|${side}`,
+        type: 'total',
+        matchup,
+        label: `${labelPrefix} ${formatNumber(metrics.line, 1)} (Total)`,
+        odds: metrics.odds,
+        marketOdds: metrics.consensusOdds ?? null,
+        fairOdds: metrics.fairOdds ?? null,
+        marketLine: metrics.consensusLine ?? null,
+        userLine: metrics.line,
+        consensusProb: metrics.consensusProb,
+        impliedProb: metrics.implied,
+        probabilityEdge: computeEdge(metrics),
+        marketEv: metrics.marketEv,
       });
     });
   });
 
   bets.sort((a, b) => {
-    const evA = typeof a.consensusEv === 'number' ? a.consensusEv : Number.NEGATIVE_INFINITY;
-    const evB = typeof b.consensusEv === 'number' ? b.consensusEv : Number.NEGATIVE_INFINITY;
+    const evA = typeof a.marketEv === 'number' ? a.marketEv : Number.NEGATIVE_INFINITY;
+    const evB = typeof b.marketEv === 'number' ? b.marketEv : Number.NEGATIVE_INFINITY;
     if (evA === evB) {
       const edgeA = typeof a.probabilityEdge === 'number' ? a.probabilityEdge : Number.NEGATIVE_INFINITY;
       const edgeB = typeof b.probabilityEdge === 'number' ? b.probabilityEdge : Number.NEGATIVE_INFINITY;
@@ -1367,19 +1573,54 @@ const collectBestEvBets = (predictions) => {
 };
 
 const getTotalEntry = (consensus, line, side) => {
-  if (!consensus || !consensus.totals || line === null || line === '') return null;
-  const pointKey = normalizePoint(line);
-  if (pointKey === null) return null;
-  const entry = consensus.totals.get(pointKey);
-  if (!entry) return null;
-  const bucket = side === 'over' ? entry.over : entry.under;
-  if (!bucket || !bucket.consensus) return null;
-  return {
-    odds: bucket.consensus.odds,
-    prob: bucket.consensus.prob,
-    sampleSize: bucket.consensus.sampleSize,
-    line: entry.point,
-  };
+  if (!consensus || !consensus.totals || !consensus.totals.size) return null;
+  const targetLine = Number.isFinite(line) ? Number(line) : null;
+  const tolerance = 0.05;
+  let best = null;
+  let bestMeta = null;
+  consensus.totals.forEach((entry) => {
+    const bucket = side === 'over' ? entry.over : entry.under;
+    if (!bucket || !bucket.consensus) return;
+    const consensusLine = entry.point;
+    const diff = targetLine === null ? 0 : Math.abs(consensusLine - targetLine);
+    const isExact = targetLine !== null && diff <= tolerance;
+    const sampleSize = bucket.consensus.sampleSize || 0;
+    const metadata = { diff, isExact, sampleSize };
+    if (!best) {
+      best = {
+        line: consensusLine,
+        odds: bucket.consensus.odds,
+        prob: bucket.consensus.prob,
+        sampleSize,
+      };
+      bestMeta = metadata;
+      return;
+    }
+    let replace = false;
+    if (metadata.isExact && !bestMeta.isExact) {
+      replace = true;
+    } else if (metadata.isExact === bestMeta.isExact) {
+      if (targetLine !== null) {
+        if (metadata.diff < bestMeta.diff - 1e-6) {
+          replace = true;
+        } else if (Math.abs(metadata.diff - bestMeta.diff) <= 1e-6 && metadata.sampleSize > bestMeta.sampleSize) {
+          replace = true;
+        }
+      } else if (metadata.sampleSize > bestMeta.sampleSize) {
+        replace = true;
+      }
+    }
+    if (replace) {
+      best = {
+        line: consensusLine,
+        odds: bucket.consensus.odds,
+        prob: bucket.consensus.prob,
+        sampleSize,
+      };
+      bestMeta = metadata;
+    }
+  });
+  return best;
 };
 
 const applyConsensusToPredictions = () => {
@@ -1445,14 +1686,18 @@ const createTotalMetrics = (consensus, inputs, side) => {
   const consensusProb = consensusEntry?.prob ?? null;
   const implied = validOdds === null ? null : oddsToProb(validOdds);
   const probabilityEdge = implied === null || consensusProb === null ? null : consensusProb - implied;
+  const marketEv = validOdds === null || consensusProb === null ? null : expectedValue(consensusProb, validOdds);
+  const fairOdds = consensusProb === null ? null : probToMoneyline(consensusProb);
   return {
     line: validLine,
     odds: validOdds,
     implied,
     consensusProb,
     probabilityEdge,
-    consensusEv: validOdds === null || consensusProb === null ? null : expectedValue(consensusProb, validOdds),
-    bestOdds: consensusEntry?.odds ?? null,
+    marketEv,
+    fairOdds,
+    consensusOdds: consensusEntry?.odds ?? null,
+    consensusLine: consensusEntry?.line ?? null,
     bestBook: consensusEntry ? sampleSizeLabel(consensusEntry.sampleSize) : null,
   };
 };
@@ -1629,23 +1874,25 @@ const renderEvCalculator = (focusInfo) => {
   const dateLabel = prediction.date ? new Date(prediction.date).toISOString().slice(0, 10) : '';
 
   const spreadCard = (side, metrics, best, inputData) => {
-    const consensusLine = best?.line ?? null;
-    const consensusOdds = best?.odds ?? null;
+    const marketLine = metrics.consensusLine ?? best?.line ?? null;
+    const marketOdds = metrics.consensusOdds ?? best?.odds ?? null;
     const consensusDescriptor = best?.label ?? null;
     const probabilityEdge = metrics.probabilityEdge;
-    const lineDiff = consensusLine === null || metrics.line === null ? null : metrics.line - consensusLine;
-    const placeholderLine = consensusLine === null || consensusLine === undefined ? '' : formatSpreadLine(consensusLine);
+    const marketEv = metrics.marketEv;
+    const lineDiff = marketLine === null || metrics.line === null ? null : metrics.line - marketLine;
+    const placeholderLine = marketLine === null ? '' : formatSpreadLine(marketLine);
     const placeholderOdds = (() => {
-      if (consensusOdds === null || consensusOdds === undefined) return '';
-      const formatted = formatMoneyline(consensusOdds);
+      if (marketOdds === null || marketOdds === undefined) return '';
+      const formatted = formatMoneyline(marketOdds);
       return formatted === '-' ? '' : formatted;
     })();
     const rawLineValue = inputData.line;
     const rawOddsValue = inputData.odds;
     const lineValue = escapeHtml(rawLineValue);
     const oddsValue = escapeHtml(rawOddsValue);
-    const lineToggle = renderSignToggle(selectedKey, 'spread', side, 'line', rawLineValue, consensusLine);
-    const oddsToggle = renderSignToggle(selectedKey, 'spread', side, 'odds', rawOddsValue, consensusOdds);
+    const lineToggle = renderSignToggle(selectedKey, 'spread', side, 'line', rawLineValue, marketLine);
+    const oddsToggle = renderSignToggle(selectedKey, 'spread', side, 'odds', rawOddsValue, marketOdds);
+    const fairOddsDisplay = metrics.fairOdds === null ? '-' : formatMoneyline(metrics.fairOdds);
     return `
       <div class="ev-card">
         <div class="ev-card-header">
@@ -1653,10 +1900,11 @@ const renderEvCalculator = (focusInfo) => {
           <span class="ev-tag">Spread</span>
         </div>
         <div class="ev-card-details">
-          ${detailRow('Consensus Line', describeConsensus(consensusLine === null ? '' : formatSpreadLine(consensusLine), consensusOdds, consensusDescriptor))}
-          ${detailRow('Consensus Win %', formatPercent(metrics.consensusProb))}
+          ${detailRow('Market Line', describeConsensus(marketLine === null ? '' : formatSpreadLine(marketLine), marketOdds, consensusDescriptor))}
+          ${detailRow('No-Vig Win %', formatPercent(metrics.consensusProb))}
           ${detailRow('Your Win %', formatPercent(metrics.implied))}
-          ${lineDiff === null ? '' : detailRow('Line vs Consensus', `${formatSigned(lineDiff, 1)} pts`)}
+          ${detailRow('Fair Odds (No-Vig)', fairOddsDisplay)}
+          ${lineDiff === null ? '' : detailRow('Line vs Market', `${formatSigned(lineDiff, 1)} pts`)}
         </div>
         <div class="ev-inputs">
           <div class="ev-input-row">
@@ -1675,8 +1923,8 @@ const renderEvCalculator = (focusInfo) => {
           </div>
         </div>
         <div class="ev-results">
-          ${metricRow('Probability Edge', formatSignedPercent(probabilityEdge))}
-          ${metricRow('Consensus EV', formatEv(metrics.consensusEv))}
+          ${metricRow('Win Prob Edge', formatSignedPercent(probabilityEdge))}
+          ${metricRow('Market EV', formatEv(marketEv))}
         </div>
       </div>
     `;
@@ -1684,18 +1932,19 @@ const renderEvCalculator = (focusInfo) => {
 
   const moneylineCard = (side, metrics, best, inputValue) => {
     const team = side === 'home' ? prediction.homeTeam : prediction.awayTeam;
-    const consensusOdds = best?.odds ?? null;
+    const marketOdds = metrics.consensusOdds ?? best?.odds ?? null;
     const consensusDescriptor = best?.label ?? null;
-    const consensusProb = metrics.consensusProb;
     const probabilityEdge = metrics.probabilityEdge;
+    const marketEv = metrics.marketEv;
     const placeholderOdds = (() => {
-      if (consensusOdds === null || consensusOdds === undefined) return '';
-      const formatted = formatMoneyline(consensusOdds);
+      if (marketOdds === null || marketOdds === undefined) return '';
+      const formatted = formatMoneyline(marketOdds);
       return formatted === '-' ? '' : formatted;
     })();
     const rawOddsValue = inputValue;
     const oddsValue = escapeHtml(rawOddsValue);
-    const oddsToggle = renderSignToggle(selectedKey, 'moneyline', side, 'odds', rawOddsValue, consensusOdds);
+    const oddsToggle = renderSignToggle(selectedKey, 'moneyline', side, 'odds', rawOddsValue, marketOdds);
+    const fairOddsDisplay = metrics.fairOdds === null ? '-' : formatMoneyline(metrics.fairOdds);
     return `
       <div class="ev-card">
         <div class="ev-card-header">
@@ -1703,9 +1952,10 @@ const renderEvCalculator = (focusInfo) => {
           <span class="ev-tag">Moneyline</span>
         </div>
         <div class="ev-card-details">
-          ${detailRow('Consensus', describeConsensus('', consensusOdds, consensusDescriptor))}
-          ${detailRow('Consensus Win %', formatPercent(consensusProb))}
+          ${detailRow('Market Odds', describeConsensus('', marketOdds, consensusDescriptor))}
+          ${detailRow('No-Vig Win %', formatPercent(metrics.consensusProb))}
           ${detailRow('Your Win %', formatPercent(metrics.implied))}
+          ${detailRow('Fair Odds (No-Vig)', fairOddsDisplay)}
         </div>
         <div class="ev-inputs">
           <label>Odds
@@ -1716,8 +1966,8 @@ const renderEvCalculator = (focusInfo) => {
           </label>
         </div>
         <div class="ev-results">
-          ${metricRow('Probability Edge', formatSignedPercent(probabilityEdge))}
-          ${metricRow('Consensus EV', formatEv(metrics.consensusEv))}
+          ${metricRow('Win Prob Edge', formatSignedPercent(probabilityEdge))}
+          ${metricRow('Market EV', formatEv(marketEv))}
         </div>
       </div>
     `;
@@ -1725,22 +1975,25 @@ const renderEvCalculator = (focusInfo) => {
 
   const totalCard = (side, metrics, best, inputData) => {
     const label = side === 'over' ? 'Over' : 'Under';
-    const consensusLine = best?.line ?? null;
-    const consensusOdds = best?.odds ?? null;
+    const marketLine = metrics.consensusLine ?? best?.line ?? null;
+    const marketOdds = metrics.consensusOdds ?? best?.odds ?? null;
     const consensusDescriptor = best?.label ?? null;
-    const placeholderLine = consensusLine === null || consensusLine === undefined ? '' : Number(consensusLine).toFixed(1);
+    const probabilityEdge = metrics.probabilityEdge;
+    const marketEv = metrics.marketEv;
+    const placeholderLine = marketLine === null ? '' : Number(marketLine).toFixed(1);
     const placeholderOdds = (() => {
-      if (consensusOdds === null || consensusOdds === undefined) return '';
-      const formatted = formatMoneyline(consensusOdds);
+      if (marketOdds === null || marketOdds === undefined) return '';
+      const formatted = formatMoneyline(marketOdds);
       return formatted === '-' ? '' : formatted;
     })();
     const rawLineValue = inputData.line;
     const rawOddsValue = inputData.odds;
     const lineValue = escapeHtml(rawLineValue);
     const oddsValue = escapeHtml(rawOddsValue);
-    const lineToggle = renderSignToggle(selectedKey, 'total', side, 'line', rawLineValue, consensusLine);
-    const oddsToggle = renderSignToggle(selectedKey, 'total', side, 'odds', rawOddsValue, consensusOdds);
-    const probabilityEdge = metrics.probabilityEdge;
+    const lineToggle = renderSignToggle(selectedKey, 'total', side, 'line', rawLineValue, marketLine);
+    const oddsToggle = renderSignToggle(selectedKey, 'total', side, 'odds', rawOddsValue, marketOdds);
+    const fairOddsDisplay = metrics.fairOdds === null ? '-' : formatMoneyline(metrics.fairOdds);
+    const lineDiff = marketLine === null || metrics.line === null ? null : metrics.line - marketLine;
     return `
       <div class="ev-card">
         <div class="ev-card-header">
@@ -1748,9 +2001,11 @@ const renderEvCalculator = (focusInfo) => {
           <span class="ev-tag">Total</span>
         </div>
         <div class="ev-card-details">
-          ${detailRow('Consensus', describeConsensus(consensusLine === null ? '' : formatNumber(consensusLine, 1), consensusOdds, consensusDescriptor))}
-          ${detailRow('Consensus Win %', formatPercent(metrics.consensusProb))}
+          ${detailRow('Market Line', describeConsensus(marketLine === null ? '' : formatNumber(marketLine, 1), marketOdds, consensusDescriptor))}
+          ${detailRow('No-Vig Win %', formatPercent(metrics.consensusProb))}
           ${detailRow('Your Win %', formatPercent(metrics.implied))}
+          ${detailRow('Fair Odds (No-Vig)', fairOddsDisplay)}
+          ${lineDiff === null ? '' : detailRow('Line vs Market', `${formatSigned(lineDiff, 1)} pts`)}
         </div>
         <div class="ev-inputs">
           <div class="ev-input-row">
@@ -1769,8 +2024,8 @@ const renderEvCalculator = (focusInfo) => {
           </div>
         </div>
         <div class="ev-results">
-          ${metricRow('Probability Edge', formatSignedPercent(probabilityEdge))}
-          ${metricRow('Consensus EV', formatEv(metrics.consensusEv))}
+          ${metricRow('Win Prob Edge', formatSignedPercent(probabilityEdge))}
+          ${metricRow('Market EV', formatEv(marketEv))}
         </div>
       </div>
     `;
@@ -1873,18 +2128,28 @@ const renderBestEvTab = () => {
   }
 
   const rows = bets.map((bet) => {
-    const consensusProb = formatPercent(bet.consensusProb);
-    const impliedProb = formatPercent(bet.impliedProb);
-    const probabilityEdge = formatSignedPercent(bet.probabilityEdge);
+    const noVigProb = formatPercent(bet.consensusProb);
+    const yourProb = formatPercent(bet.impliedProb);
+    const edgeDisplay = formatSignedPercent(bet.probabilityEdge);
+    const evDisplay = formatEv(bet.marketEv);
+    const yourOdds = formatMoneyline(bet.odds);
+    const marketOdds = formatMoneyline(bet.marketOdds);
+    const fairOdds = bet.fairOdds === null ? '-' : formatMoneyline(bet.fairOdds);
+    const lineDelta = bet.marketLine !== null && bet.userLine !== null
+      ? `${formatSigned(bet.userLine - bet.marketLine, 1)} pts`
+      : '-';
     return `
       <tr>
         <td>${escapeHtml(bet.matchup)}</td>
         <td>${escapeHtml(bet.label)}</td>
-        <td>${formatMoneyline(bet.odds)}</td>
-        <td>${consensusProb}</td>
-        <td>${impliedProb}</td>
-        <td>${probabilityEdge}</td>
-        <td>${formatEv(bet.consensusEv)}</td>
+        <td>${yourOdds}</td>
+        <td>${marketOdds}</td>
+        <td>${fairOdds}</td>
+        <td>${noVigProb}</td>
+        <td>${yourProb}</td>
+        <td>${edgeDisplay}</td>
+        <td>${evDisplay}</td>
+        <td>${lineDelta}</td>
       </tr>
     `;
   }).join('');
@@ -1895,11 +2160,14 @@ const renderBestEvTab = () => {
         <tr>
           <th>Game</th>
           <th>Bet</th>
-          <th>Odds</th>
-          <th>Consensus Win %</th>
+          <th>Your Odds</th>
+          <th>Market Odds</th>
+          <th>Fair Odds (No-Vig)</th>
+          <th>No-Vig Win %</th>
           <th>Your Win %</th>
-          <th>Probability Edge</th>
-          <th>Consensus EV</th>
+          <th>Edge</th>
+          <th>EV</th>
+          <th>Line Δ</th>
         </tr>
       </thead>
       <tbody>${rows}</tbody>
@@ -2139,6 +2407,7 @@ const attachEvInputs = (focusInfo) => {
         if (field === 'line') bucket.line = value;
         if (field === 'odds') bucket.odds = value;
       }
+      trackClvForInput(gameKey, evType, side);
       renderEvCalculator({ gameKey, evType, side, field, caret });
     });
   });
